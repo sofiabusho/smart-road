@@ -1,0 +1,36 @@
+---
+description: Points agents to AGENTS.md and the docs/ source-of-truth structure for this project.
+alwaysApply: true
+---
+
+# Project Standards
+
+This project uses a **requirements-first, audit-first** agent workflow. Follow it before writing or changing code.
+
+## Read First
+
+1. **`AGENTS.md`** — project overview, technology constraints, directory layout, coding standards, test commands, and PR checklist.
+2. **`docs/AGENT_WORKFLOW.md`** — how to navigate docs, start tickets, and close work with audit evidence.
+
+## Source of Truth
+
+| Document | Use when |
+|----------|----------|
+| `docs/requirements.md` | Understanding stakeholder requirements (REQ IDs) |
+| `docs/audit.md` | Verifying acceptance before marking tickets done (AUD IDs) |
+| `docs/PRD.md` | Product goals, priorities, and detailed requirements |
+| `docs/SDS.md` | API contracts, architecture, and implementation detail |
+| `docs/ticket-tracker.md` | Current sprint, ticket status, dependencies, traceability |
+
+## Implementing a Ticket
+
+- Use **`.agents/workflows/implement-ticket.md`** as the step-by-step playbook.
+- Save handover artifacts to **`docs/pr-messages/`** using **`docs/pr-messages/pr-template.md`**.
+- Update **`docs/ticket-tracker.md`** when starting (🟢) and finishing (✅) a ticket.
+
+## Rules
+
+- Do not mark work complete without verifying relevant **AUD-*** items in `docs/audit.md`.
+- Do not edit `docs/requirements.md` or `docs/audit.md` without explicit approval — they are acceptance gates.
+- Match existing code conventions; prefer extending current patterns over new abstractions.
+- Optional project skills live in `.agents/skills/`; supplemental rules in `.agents/rules/`.
