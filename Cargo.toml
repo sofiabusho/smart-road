@@ -1,0 +1,19 @@
+[package]
+name = "smart-road"
+version = "0.1.0"
+edition = "2021"
+description = "Smart intersection autonomous-vehicle simulation (Rust/SDL2)"
+license = "MIT"
+
+[lib]
+name = "smart_road"
+path = "src/lib.rs"
+
+[[bin]]
+name = "smart-road"
+path = "src/main.rs"
+
+[dependencies]
+sdl2 = "0.37"
+
+[dev-dependencies]
