@@ -87,7 +87,7 @@ Execution order:
 | ID | Status | Ticket | Size | Deps | REQ / AUD | Verification gate | Track |
 |----|--------|--------|------|------|-----------|-------------------|-------|
 | A01 | ✅ | **Project scaffolding**: `cargo init`, SDL2 window, empty game loop, `assets/` dirs | S | — | NFR-1, NFR-2, NFR-4 | `cargo run` opens blank window; `cargo build` succeeds | A |
-| A02 | ⬜ | **Quality gates**: `cargo test` harness, clippy/fmt notes in README | S | A01 | NFR-5 | `cargo test`; `cargo clippy`; `cargo fmt --check` | A |
+| A02 | ✅ | **Quality gates**: `cargo test` harness, clippy/fmt notes in README | S | A01 | NFR-5 | `cargo test`; `cargo clippy`; `cargo fmt --check` | A |
 | A03 | ⬜ | **Intersection render**: cross layout, road assets, lane ID registry stub | M | A01 | REQ-1, REQ-2, REQ-10 · AUD-1, AUD-2 | AUD-1, AUD-2 | A |
 | A04 | ⬜ | **Arrow-key spawn**: four cardinal approaches, `SpawnRequest` API | M | A03 | REQ-12–REQ-15 · AUD-3–AUD-6 | AUD-3–AUD-6 | A |
 | A05 | ⬜ | **Spawn anti-spam**: per-direction cooldown | S | A04 | REQ-18 · AUD-27 | AUD-27 | A |
