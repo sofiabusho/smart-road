@@ -45,6 +45,8 @@ Road tiles live in `assets/roads/` (BMP). Regenerate with:
 python3 scripts/generate_road_assets.py
 ```
 
+Layout constants in `src/config.rs` and `scripts/generate_road_assets.py` must stay in sync; rerun the script after changing window size, margins, or lane dimensions.
+
 ### SDL2_image (optional, later tickets)
 
 PNG vehicle sprites (ticket **A07+**) may use the `sdl2` `image` feature. Install when needed:
