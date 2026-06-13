@@ -8,7 +8,7 @@
 > - **A/B/C**: Parallel developer tracks (see §2)
 > - **🔗**: Cross-track dependency — external ticket must be ✅ first
 
-Last refreshed: 2026-06-10 (A01, A02 ✅)
+Last refreshed: 2026-06-13 (A01, A02, A03 ✅)
 
 ---
 
@@ -88,7 +88,7 @@ Execution order:
 |----|--------|--------|------|------|-----------|-------------------|-------|
 | A01 | ✅ | **Project scaffolding**: `cargo init`, SDL2 window, empty game loop, `assets/` dirs | S | — | NFR-1, NFR-2, NFR-4 | `cargo run` opens blank window; `cargo build` succeeds | A |
 | A02 | ✅ | **Quality gates**: `cargo test` harness, clippy/fmt notes in README | S | A01 | NFR-5 | `cargo test`; `cargo clippy`; `cargo fmt --check` | A |
-| A03 | ⬜ | **Intersection render**: cross layout, road assets, lane ID registry stub | M | A01 | REQ-1, REQ-2, REQ-10 · AUD-1, AUD-2 | AUD-1, AUD-2 | A |
+| A03 | ✅ | **Intersection render**: cross layout, road assets, lane ID registry stub | M | A01 | REQ-1, REQ-2, REQ-10 · AUD-1, AUD-2 | AUD-1, AUD-2 | A |
 | A04 | ⬜ | **Arrow-key spawn**: four cardinal approaches, `SpawnRequest` API | M | A03 | REQ-12–REQ-15 · AUD-3–AUD-6 | AUD-3–AUD-6 | A |
 | A05 | ⬜ | **Spawn anti-spam**: per-direction cooldown | S | A04 | REQ-18 · AUD-27 | AUD-27 | A |
 | A06 | ⬜ | **`R` random spawn**: continuous random lane/route | S | A04 | REQ-16 · AUD-7 | AUD-7 | A |
@@ -169,9 +169,8 @@ No circular dependencies.
 
 | When | Pick up | Blocked by |
 |------|---------|------------|
-| ~~**Start**~~ | ~~**A01**~~ ✅ · ~~**A02**~~ ✅ | — |
-| **Now** | **A03** (intersection render) | — |
-| After A03 ✅ | **A04** | — |
+| ~~**Start**~~ | ~~**A01**~~ ✅ · ~~**A02**~~ ✅ · ~~**A03**~~ ✅ | — |
+| **Now** | **A04** (arrow-key spawn) | — |
 | After A04 ✅ | **A05** ∥ **A06** (parallel) | — |
 | After B02 ✅ | **A07** | B02 🔗 |
 | Anytime after A03 ✅ | **A08** *(bonus)* | — |
@@ -335,9 +334,8 @@ No circular dependencies.
 
 ### Dev A
 
-1. **A03** — Intersection render + lane registry stub
-2. **A04** — after A03 (arrow-key spawn)
-3. **A02** ✅ · **A01** ✅ — scaffolding complete
+1. **A04** — arrow-key spawn (`SpawnRequest` API)
+2. **A03** ✅ · **A02** ✅ · **A01** ✅ — scaffolding + intersection render complete
 
 ### Dev B
 
