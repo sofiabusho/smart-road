@@ -99,7 +99,7 @@ impl App {
     }
 
     fn update(&mut self) {
-        // Simulation update hooks land in B/C tracks (A01: no-op).
+        // Simulation update hooks land in B/C tracks (A03: presentation only).
         let _ = (
             &mut self.intersection,
             &mut self.spawn,
@@ -110,9 +110,13 @@ impl App {
     }
 
     fn draw(&mut self) -> Result<(), String> {
-        self.canvas.set_draw_color(Color::RGB(32, 48, 32));
+        self.canvas.set_draw_color(Color::RGB(42, 90, 42));
         self.canvas.clear();
-        render::draw_frame(&mut self.canvas, &self.intersection)?;
+
+        let texture_creator = self.canvas.texture_creator();
+        let road_assets = render::RoadAssets::load(&texture_creator)?;
+        render::draw_frame(&mut self.canvas, &self.intersection, &road_assets)?;
+
         self.canvas.present();
         Ok(())
     }
