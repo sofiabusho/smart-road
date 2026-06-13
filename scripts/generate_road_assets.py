@@ -115,23 +115,28 @@ def intersection_core(size: int, lane_width: int) -> list[list[tuple[int, int, i
 
 
 def main() -> None:
+    # Layout constants — must match src/config.rs (regenerate assets after changes).
+    window_width = 1024
+    window_height = 768
     lane_width = 40
-    road_width = lane_width * 3
-    window_half = 768 // 2
+    lanes_per_approach = 3
     approach_margin = 48
-    arm_length = window_half - road_width // 2 - approach_margin
+
+    road_width = lane_width * lanes_per_approach
+    ns_arm_length = window_height // 2 - road_width // 2 - approach_margin
+    ew_arm_length = window_width // 2 - road_width // 2 - approach_margin
 
     write_bmp(
         os.path.join(OUT_DIR, "approach_ns.bmp"),
         road_width,
-        arm_length,
-        road_vertical(road_width, arm_length, lane_width),
+        ns_arm_length,
+        road_vertical(road_width, ns_arm_length, lane_width),
     )
     write_bmp(
         os.path.join(OUT_DIR, "approach_ew.bmp"),
-        arm_length,
+        ew_arm_length,
         road_width,
-        road_horizontal(arm_length, road_width, lane_width),
+        road_horizontal(ew_arm_length, road_width, lane_width),
     )
     write_bmp(
         os.path.join(OUT_DIR, "intersection_core.bmp"),
