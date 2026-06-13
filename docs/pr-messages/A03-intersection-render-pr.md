@@ -22,7 +22,8 @@ Implements the **cross intersection render** and **lane ID registry stub** for T
 ## Technical Decisions
 
 - **BMP via core SDL2**: Road tiles load with `Surface::load_bmp` (no `sdl2` `image` feature / `libsdl2-image-dev` required for A03). Satisfies AUD-2 asset requirement; PNG/SDL2_image deferred to vehicle sprites (A07+).
-- **Per-frame texture load**: Textures are created each draw call to avoid self-referential `Canvas`/`Texture` lifetimes. Acceptable for three small tiles at A03 scope.
+- **Startup texture cache**: `RoadAssets` loads once in `App::run` alongside the canvas `TextureCreator`; both live in the same stack scope for the game loop (no `unsafe` lifetime erasure).
+- **Approach-aware spawn offsets**: `lane_center_offset(approach, route)` mirrors right-hand traffic per heading so spawn points align with BMP lane markings on all four arms.
 - **Lane ID scheme**: `LaneId(approach_index * 3 + route_index)` — stable for B02 path attachment and A04 spawn.
 - **Zone polygon**: Axis-aligned square around junction center (`INTERSECTION_HALF_SIZE`) for C01 detection contract.
 
@@ -30,7 +31,7 @@ Implements the **cross intersection render** and **lane ID registry stub** for T
 
 ### Automated Checks
 
-- [x] `cargo test` — 13 tests passed (10 unit + 3 integration)
+- [x] `cargo test` — 15 tests passed (12 unit + 3 integration)
 - [x] `cargo clippy -- -D warnings` — clean
 - [x] `cargo fmt --check` — clean
 - [x] `cargo build` — succeeds
@@ -50,7 +51,7 @@ Implements the **cross intersection render** and **lane ID registry stub** for T
 
 - **Test output**:
   ```text
-  running 10 tests ... ok
+  running 12 tests ... ok
   running 3 tests (smoke) ... ok
   ```
 - **Lint output**: clippy clean with `-D warnings`
