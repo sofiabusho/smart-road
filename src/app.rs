@@ -10,7 +10,7 @@ use sdl2::Sdl;
 use crate::config::{WINDOW_HEIGHT, WINDOW_TITLE, WINDOW_WIDTH};
 use crate::input::InputState;
 use crate::intersection::IntersectionModel;
-use crate::render;
+use crate::render::{self, RoadAssets};
 use crate::smart::SmartController;
 use crate::spawn::SpawnSystem;
 use crate::stats::Stats;
@@ -20,7 +20,6 @@ type WindowCanvas = Canvas<Window>;
 /// Top-level application state (expanded in later tickets).
 pub struct App {
     _sdl: Sdl,
-    canvas: WindowCanvas,
     running: bool,
     intersection: IntersectionModel,
     #[allow(dead_code)]
@@ -30,7 +29,6 @@ pub struct App {
     #[allow(dead_code)]
     stats: Stats,
     input: InputState,
-    road_assets: render::RoadAssets<'static>,
 }
 
 impl App {
@@ -45,36 +43,33 @@ impl App {
             .build()
             .map_err(|e| format!("SDL window failed: {e}"))?;
 
-        let canvas = window
+        let mut canvas = window
             .into_canvas()
             .accelerated()
             .build()
             .map_err(|e| format!("SDL canvas failed: {e}"))?;
 
+        // Textures borrow the canvas `TextureCreator`; keep both in this scope for
+        // the whole loop so lifetimes stay sound without unsafe erasure.
         let texture_creator = canvas.texture_creator();
-        let road_assets = render::load_road_assets_cached(&texture_creator)?;
+        let road_assets = RoadAssets::load(&texture_creator)?;
 
         let mut app = App {
             _sdl: sdl,
-            canvas,
             running: true,
             intersection: IntersectionModel::new(),
             spawn: SpawnSystem::new(),
             smart: SmartController::new(),
             stats: Stats::new(),
             input: InputState::new(),
-            road_assets,
         };
 
-        app.game_loop()
-    }
-
-    fn game_loop(&mut self) -> Result<(), String> {
-        while self.running {
-            self.poll_events()?;
-            self.update();
-            self.draw()?;
+        while app.running {
+            app.poll_events()?;
+            app.update();
+            app.draw(&mut canvas, &road_assets)?;
         }
+
         Ok(())
     }
 
@@ -114,13 +109,13 @@ impl App {
         );
     }
 
-    fn draw(&mut self) -> Result<(), String> {
-        self.canvas.set_draw_color(Color::RGB(42, 90, 42));
-        self.canvas.clear();
+    fn draw(&self, canvas: &mut WindowCanvas, road_assets: &RoadAssets<'_>) -> Result<(), String> {
+        canvas.set_draw_color(Color::RGB(42, 90, 42));
+        canvas.clear();
 
-        render::draw_frame(&mut self.canvas, &self.intersection, &self.road_assets)?;
+        render::draw_frame(canvas, &self.intersection, road_assets)?;
 
-        self.canvas.present();
+        canvas.present();
         Ok(())
     }
 }
