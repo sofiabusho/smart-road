@@ -3,7 +3,7 @@
 use smart_road::config::{
     FIXED_TIMESTEP_SECS, TARGET_FPS, WINDOW_HEIGHT, WINDOW_TITLE, WINDOW_WIDTH,
 };
-use smart_road::intersection::IntersectionModel;
+use smart_road::intersection::{lane_id, Cardinal, IntersectionModel, Route};
 use smart_road::smart::SmartController;
 use smart_road::spawn::SpawnSystem;
 use smart_road::stats::Stats;
@@ -23,4 +23,14 @@ fn crate_smoke_module_defaults_construct() {
     let _ = SpawnSystem::new();
     let _ = SmartController::new();
     let _ = Stats::new();
+}
+
+#[test]
+fn crate_smoke_intersection_lane_registry() {
+    let model = IntersectionModel::new();
+    assert_eq!(model.lanes.len(), 12);
+    assert_eq!(model.zone_polygon.len(), 4);
+    let south_straight = model.lane(lane_id(Cardinal::South, Route::Straight));
+    assert!(south_straight.is_some());
+    assert_eq!(model.lanes_for_approach(Cardinal::North).len(), 3);
 }

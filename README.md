@@ -37,16 +37,24 @@ Install [Rust](https://www.rust-lang.org/tools/install) (edition 2021). The proj
 cargo --version
 ```
 
-### SDL2_image (later tickets)
+### Road assets (A03+)
 
-When loading road/vehicle assets (ticket **A03**), install the image development library:
+Road tiles live in `assets/roads/` (BMP). Regenerate with:
+
+```bash
+python3 scripts/generate_road_assets.py
+```
+
+Layout constants in `src/config.rs` and `scripts/generate_road_assets.py` must stay in sync; rerun the script after changing window size, margins, or lane dimensions.
+
+### SDL2_image (optional, later tickets)
+
+PNG vehicle sprites (ticket **A07+**) may use the `sdl2` `image` feature. Install when needed:
 
 ```bash
 # Ubuntu / Debian
 sudo apt install -y libsdl2-image-dev
 ```
-
-The `sdl2` crate `image` feature will be enabled in that ticket.
 
 ## Build and run
 
@@ -55,7 +63,7 @@ cargo build
 cargo run
 ```
 
-A window titled **smart-road** opens with an empty dark-green loop. Close the window or press **Esc** to quit.
+A window titled **smart-road** opens showing a **four-way cross intersection** with road tile assets. Close the window or press **Esc** to quit.
 
 ## Development commands
 

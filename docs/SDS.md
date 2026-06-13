@@ -377,7 +377,22 @@ pub enum InputEvent {
 }
 
 // render.rs (A03, A07)
-pub fn draw_intersection(canvas: &mut Canvas, model: &IntersectionModel);
+pub struct RoadAssets<'tex> { /* BMP textures + layout dims */ }
+
+impl<'tex> RoadAssets<'tex> {
+    pub fn load(creator: &'tex TextureCreator<WindowContext>) -> Result<Self, String>;
+}
+
+pub fn draw_intersection(
+    canvas: &mut Canvas,
+    model: &IntersectionModel,
+    assets: &RoadAssets<'_>,
+);
+pub fn draw_frame(
+    canvas: &mut Canvas,
+    intersection: &IntersectionModel,
+    assets: &RoadAssets<'_>,
+);
 pub fn draw_vehicle(canvas: &mut Canvas, snapshot: &VehicleRenderSnapshot);
 
 pub struct VehicleRenderSnapshot {
