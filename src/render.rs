@@ -18,7 +18,8 @@ pub struct RoadAssets<'tex> {
     approach_ew: Texture<'tex>,
     intersection_core: Texture<'tex>,
     road_width: u32,
-    arm_length: u32,
+    ns_arm_length: u32,
+    ew_arm_length: u32,
 }
 
 impl<'tex> RoadAssets<'tex> {
@@ -28,16 +29,29 @@ impl<'tex> RoadAssets<'tex> {
         let intersection_core = load_texture(creator, "intersection_core.bmp")?;
 
         let road_width = approach_ns.query().width;
-        let arm_length = approach_ns.query().height;
+        let ns_arm_length = approach_ns.query().height;
+        let ew_arm_length = approach_ew.query().width;
 
         Ok(Self {
             approach_ns,
             approach_ew,
             intersection_core,
             road_width,
-            arm_length,
+            ns_arm_length,
+            ew_arm_length,
         })
     }
+}
+
+/// Load road assets once at startup and cache on [`App`](crate::app::App).
+///
+/// Textures are tied to the canvas `TextureCreator` lifetime. The returned `'static`
+/// lifetime is safe because textures remain valid until the canvas is dropped.
+pub fn load_road_assets_cached(
+    creator: &TextureCreator<WindowContext>,
+) -> Result<RoadAssets<'static>, String> {
+    let assets = RoadAssets::load(creator)?;
+    Ok(unsafe { std::mem::transmute::<RoadAssets<'_>, RoadAssets<'static>>(assets) })
 }
 
 fn load_texture<'tex>(
@@ -60,7 +74,8 @@ pub fn draw_intersection(
     assets: &RoadAssets<'_>,
 ) -> Result<(), String> {
     let rw = assets.road_width;
-    let al = assets.arm_length as i32;
+    let ns_al = assets.ns_arm_length as i32;
+    let ew_al = assets.ew_arm_length as i32;
     let cx = INTERSECTION_CENTER_X as i32;
     let cy = INTERSECTION_CENTER_Y as i32;
     let half = (ROAD_WIDTH / 2.0) as i32;
@@ -70,22 +85,22 @@ pub fn draw_intersection(
         .copy(&assets.intersection_core, None, core_dst)
         .map_err(|e| format!("draw intersection core: {e}"))?;
 
-    let north_dst = Rect::new(cx - half, cy - half - al, rw, al as u32);
+    let north_dst = Rect::new(cx - half, cy - half - ns_al, rw, ns_al as u32);
     canvas
         .copy(&assets.approach_ns, None, north_dst)
         .map_err(|e| format!("draw north approach: {e}"))?;
 
-    let south_dst = Rect::new(cx - half, cy + half, rw, al as u32);
+    let south_dst = Rect::new(cx - half, cy + half, rw, ns_al as u32);
     canvas
         .copy(&assets.approach_ns, None, south_dst)
         .map_err(|e| format!("draw south approach: {e}"))?;
 
-    let west_dst = Rect::new(cx - half - al, cy - half, al as u32, rw);
+    let west_dst = Rect::new(cx - half - ew_al, cy - half, ew_al as u32, rw);
     canvas
         .copy(&assets.approach_ew, None, west_dst)
         .map_err(|e| format!("draw west approach: {e}"))?;
 
-    let east_dst = Rect::new(cx + half, cy - half, al as u32, rw);
+    let east_dst = Rect::new(cx + half, cy - half, ew_al as u32, rw);
     canvas
         .copy(&assets.approach_ew, None, east_dst)
         .map_err(|e| format!("draw east approach: {e}"))?;
@@ -122,7 +137,7 @@ pub fn draw_vehicle(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{APPROACH_ARM_LENGTH, WINDOW_HEIGHT, WINDOW_WIDTH};
+    use crate::config::{APPROACH_ARM_LENGTH, EW_ARM_LENGTH, WINDOW_HEIGHT, WINDOW_WIDTH};
 
     #[test]
     fn road_asset_paths_are_under_assets_dir() {
@@ -133,10 +148,11 @@ mod tests {
     #[test]
     fn layout_constants_fit_default_window() {
         let half = (ROAD_WIDTH / 2.0) as i32;
-        let arm = APPROACH_ARM_LENGTH as i32;
-        assert!(INTERSECTION_CENTER_X as i32 - half - arm >= 0);
-        assert!(INTERSECTION_CENTER_X as i32 + half + arm <= WINDOW_WIDTH as i32);
-        assert!(INTERSECTION_CENTER_Y as i32 - half - arm >= 0);
-        assert!(INTERSECTION_CENTER_Y as i32 + half + arm <= WINDOW_HEIGHT as i32);
+        let ns_arm = APPROACH_ARM_LENGTH as i32;
+        let ew_arm = EW_ARM_LENGTH as i32;
+        assert!(INTERSECTION_CENTER_X as i32 - half - ew_arm >= 0);
+        assert!(INTERSECTION_CENTER_X as i32 + half + ew_arm <= WINDOW_WIDTH as i32);
+        assert!(INTERSECTION_CENTER_Y as i32 - half - ns_arm >= 0);
+        assert!(INTERSECTION_CENTER_Y as i32 + half + ns_arm <= WINDOW_HEIGHT as i32);
     }
 }

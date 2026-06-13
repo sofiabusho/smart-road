@@ -30,6 +30,7 @@ pub struct App {
     #[allow(dead_code)]
     stats: Stats,
     input: InputState,
+    road_assets: render::RoadAssets<'static>,
 }
 
 impl App {
@@ -50,6 +51,9 @@ impl App {
             .build()
             .map_err(|e| format!("SDL canvas failed: {e}"))?;
 
+        let texture_creator = canvas.texture_creator();
+        let road_assets = render::load_road_assets_cached(&texture_creator)?;
+
         let mut app = App {
             _sdl: sdl,
             canvas,
@@ -59,6 +63,7 @@ impl App {
             smart: SmartController::new(),
             stats: Stats::new(),
             input: InputState::new(),
+            road_assets,
         };
 
         app.game_loop()
@@ -113,9 +118,7 @@ impl App {
         self.canvas.set_draw_color(Color::RGB(42, 90, 42));
         self.canvas.clear();
 
-        let texture_creator = self.canvas.texture_creator();
-        let road_assets = render::RoadAssets::load(&texture_creator)?;
-        render::draw_frame(&mut self.canvas, &self.intersection, &road_assets)?;
+        render::draw_frame(&mut self.canvas, &self.intersection, &self.road_assets)?;
 
         self.canvas.present();
         Ok(())

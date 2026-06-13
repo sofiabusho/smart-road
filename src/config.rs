@@ -15,7 +15,10 @@ pub const TARGET_FPS: u32 = 60;
 /// Fixed simulation timestep in seconds (`1 / TARGET_FPS`).
 pub const FIXED_TIMESTEP_SECS: f32 = 1.0 / TARGET_FPS as f32;
 
-/// World coordinate system: origin top-left, +x east, +y south (SDL convention).
+// World coordinate system: origin top-left, +x east, +y south (SDL convention).
+// Layout constants below are mirrored in scripts/generate_road_assets.py — regenerate
+// assets/roads/*.bmp after changing window size, margins, or lane dimensions.
+
 /// Lane width in world units (pixels at 1:1 scale).
 pub const LANE_WIDTH: f32 = 40.0;
 
@@ -35,9 +38,12 @@ pub const APPROACH_MARGIN: f32 = 48.0;
 pub const INTERSECTION_CENTER_X: f32 = WINDOW_WIDTH as f32 / 2.0;
 pub const INTERSECTION_CENTER_Y: f32 = WINDOW_HEIGHT as f32 / 2.0;
 
-/// Length of each approach arm from junction edge to near window edge.
+/// North/south arm length from junction edge to top/bottom approach margin.
 pub const APPROACH_ARM_LENGTH: f32 =
     INTERSECTION_CENTER_Y - INTERSECTION_HALF_SIZE - APPROACH_MARGIN;
+
+/// East/west arm length from junction edge to left/right approach margin.
+pub const EW_ARM_LENGTH: f32 = INTERSECTION_CENTER_X - INTERSECTION_HALF_SIZE - APPROACH_MARGIN;
 
 #[cfg(test)]
 mod tests {
@@ -58,5 +64,17 @@ mod tests {
     #[test]
     fn road_width_matches_lane_count() {
         assert!((ROAD_WIDTH - LANE_WIDTH * LANES_PER_APPROACH as f32).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn arm_lengths_reach_window_margins() {
+        let half = INTERSECTION_HALF_SIZE;
+        assert!(
+            (APPROACH_ARM_LENGTH - (INTERSECTION_CENTER_Y - half - APPROACH_MARGIN)).abs()
+                < f32::EPSILON
+        );
+        assert!(
+            (EW_ARM_LENGTH - (INTERSECTION_CENTER_X - half - APPROACH_MARGIN)).abs() < f32::EPSILON
+        );
     }
 }
