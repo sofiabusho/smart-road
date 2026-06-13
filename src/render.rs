@@ -43,17 +43,6 @@ impl<'tex> RoadAssets<'tex> {
     }
 }
 
-/// Load road assets once at startup and cache on [`App`](crate::app::App).
-///
-/// Textures are tied to the canvas `TextureCreator` lifetime. The returned `'static`
-/// lifetime is safe because textures remain valid until the canvas is dropped.
-pub fn load_road_assets_cached(
-    creator: &TextureCreator<WindowContext>,
-) -> Result<RoadAssets<'static>, String> {
-    let assets = RoadAssets::load(creator)?;
-    Ok(unsafe { std::mem::transmute::<RoadAssets<'_>, RoadAssets<'static>>(assets) })
-}
-
 fn load_texture<'tex>(
     creator: &'tex TextureCreator<WindowContext>,
     file_name: &str,
