@@ -133,7 +133,7 @@ fn build_lane_registry() -> Vec<LaneInfo> {
 }
 
 fn spawn_point_for(approach: Cardinal, route: Route) -> Vec2 {
-    let lane_center_offset = lane_center_offset(route);
+    let lane_center_offset = lane_center_offset(approach, route);
     match approach {
         Cardinal::North => Vec2::new(INTERSECTION_CENTER_X + lane_center_offset, APPROACH_MARGIN),
         Cardinal::South => Vec2::new(
@@ -148,12 +148,19 @@ fn spawn_point_for(approach: Cardinal, route: Route) -> Vec2 {
     }
 }
 
-/// Offset from road centerline to lane center (right negative, left positive for NS approaches).
-fn lane_center_offset(route: Route) -> f32 {
+/// Offset from road centerline to lane center for right-hand traffic.
+///
+/// Lanes run along X for N/S approaches and along Y for E/W approaches.
+/// "Right" is the driver's right given the approach heading into the junction.
+fn lane_center_offset(approach: Cardinal, route: Route) -> f32 {
+    let right = match approach {
+        Cardinal::North | Cardinal::West => LANE_WIDTH,
+        Cardinal::South | Cardinal::East => -LANE_WIDTH,
+    };
     match route {
-        Route::Right => -LANE_WIDTH,
+        Route::Right => right,
         Route::Straight => 0.0,
-        Route::Left => LANE_WIDTH,
+        Route::Left => -right,
     }
 }
 
@@ -232,5 +239,30 @@ mod tests {
             .lane(lane_id(Cardinal::North, Route::Straight))
             .unwrap();
         assert!(north.spawn_point.y < INTERSECTION_CENTER_Y);
+    }
+
+    #[test]
+    fn spawn_offsets_match_right_hand_traffic() {
+        let model = IntersectionModel::new();
+
+        let north_right = model.lane(lane_id(Cardinal::North, Route::Right)).unwrap();
+        let north_left = model.lane(lane_id(Cardinal::North, Route::Left)).unwrap();
+        assert!(north_right.spawn_point.x > INTERSECTION_CENTER_X);
+        assert!(north_left.spawn_point.x < INTERSECTION_CENTER_X);
+
+        let south_right = model.lane(lane_id(Cardinal::South, Route::Right)).unwrap();
+        let south_left = model.lane(lane_id(Cardinal::South, Route::Left)).unwrap();
+        assert!(south_right.spawn_point.x < INTERSECTION_CENTER_X);
+        assert!(south_left.spawn_point.x > INTERSECTION_CENTER_X);
+
+        let east_right = model.lane(lane_id(Cardinal::East, Route::Right)).unwrap();
+        let east_left = model.lane(lane_id(Cardinal::East, Route::Left)).unwrap();
+        assert!(east_right.spawn_point.y < INTERSECTION_CENTER_Y);
+        assert!(east_left.spawn_point.y > INTERSECTION_CENTER_Y);
+
+        let west_right = model.lane(lane_id(Cardinal::West, Route::Right)).unwrap();
+        let west_left = model.lane(lane_id(Cardinal::West, Route::Left)).unwrap();
+        assert!(west_right.spawn_point.y > INTERSECTION_CENTER_Y);
+        assert!(west_left.spawn_point.y < INTERSECTION_CENTER_Y);
     }
 }
