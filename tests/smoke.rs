@@ -40,19 +40,28 @@ fn crate_smoke_intersection_lane_registry() {
 #[test]
 fn crate_smoke_arrow_spawn_pipeline() {
     let model = IntersectionModel::new();
-    let mut spawn = SpawnSystem::new();
+    let cases = [
+        (Keycode::Up, Cardinal::South),
+        (Keycode::Down, Cardinal::North),
+        (Keycode::Right, Cardinal::West),
+        (Keycode::Left, Cardinal::East),
+    ];
 
-    let approach = approach_for_arrow(Keycode::Up).expect("Up maps to South");
-    assert_eq!(approach, Cardinal::South);
+    for (key, expected_approach) in cases {
+        let approach = approach_for_arrow(key).expect("arrow key maps to approach");
+        assert_eq!(approach, expected_approach);
 
-    let id = spawn
-        .try_spawn(SpawnRequest::new(approach, Route::Straight), &model)
-        .expect("spawn succeeds");
-    assert_eq!(spawn.vehicles().len(), 1);
-    assert_eq!(spawn.vehicles()[0].id, id);
+        let mut spawn = SpawnSystem::new();
+        let id = spawn
+            .try_spawn(SpawnRequest::new(approach, Route::Straight), &model)
+            .expect("spawn succeeds");
+        assert_eq!(spawn.vehicles().len(), 1);
+        assert_eq!(spawn.vehicles()[0].id, id);
+        assert_eq!(spawn.vehicles()[0].approach, expected_approach);
 
-    let mut input = InputState::new();
-    input.on_key_down(Some(Keycode::Up));
-    let events: Vec<_> = input.drain_events().collect();
-    assert_eq!(events, vec![InputEvent::SpawnCardinal(Cardinal::South)]);
+        let mut input = InputState::new();
+        input.on_key_down(Some(key));
+        let events: Vec<_> = input.drain_events().collect();
+        assert_eq!(events, vec![InputEvent::SpawnCardinal(expected_approach)]);
+    }
 }
