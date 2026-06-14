@@ -1,7 +1,6 @@
 //! Autonomous vehicle state and physics (B01+).
 
-use crate::intersection::{LaneId, LaneInfo, Route, Vec2};
-use crate::render::VehicleRenderSnapshot;
+use crate::intersection::{LaneId, LaneInfo, Route, Vec2, VehicleRenderSnapshot};
 
 /// Unique vehicle identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

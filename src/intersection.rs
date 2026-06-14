@@ -83,6 +83,14 @@ pub struct LaneInfo {
     pub spawn_point: Vec2,
 }
 
+/// Render-facing vehicle snapshot (A04; shared by B `snapshot_for_render` and A `draw_vehicle`).
+#[derive(Debug, Clone, Copy)]
+pub struct VehicleRenderSnapshot {
+    pub position: Vec2,
+    pub heading_rad: f32,
+    pub approach: Cardinal,
+}
+
 /// Intersection layout and detection zone (paths in B02).
 #[derive(Debug)]
 pub struct IntersectionModel {

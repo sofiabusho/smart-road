@@ -11,7 +11,7 @@ use sdl2::video::{Window, WindowContext};
 use crate::config::{
     INTERSECTION_CENTER_X, INTERSECTION_CENTER_Y, ROAD_WIDTH, VEHICLE_LENGTH, VEHICLE_WIDTH,
 };
-use crate::intersection::{Cardinal, IntersectionModel};
+use crate::intersection::{Cardinal, IntersectionModel, VehicleRenderSnapshot};
 
 const ROAD_ASSET_DIR: &str = "assets/roads";
 
@@ -112,14 +112,6 @@ pub fn draw_frame(
         draw_vehicle(canvas, snapshot)?;
     }
     Ok(())
-}
-
-/// Vehicle render snapshot (A04: position + heading; A07: texture rotation).
-#[derive(Debug, Clone, Copy)]
-pub struct VehicleRenderSnapshot {
-    pub position: crate::intersection::Vec2,
-    pub heading_rad: f32,
-    pub approach: Cardinal,
 }
 
 /// Draw a single vehicle as a colored oriented rectangle (A04; A07 adds sprite rotation).
