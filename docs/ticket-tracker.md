@@ -8,7 +8,7 @@
 > - **A/B/C**: Parallel developer tracks (see §2)
 > - **🔗**: Cross-track dependency — external ticket must be ✅ first
 
-Last refreshed: 2026-06-13 (A01, A02, A03 ✅)
+Last refreshed: 2026-06-14 (A01, A02, A03, A04 ✅)
 
 ---
 
@@ -89,7 +89,7 @@ Execution order:
 | A01 | ✅ | **Project scaffolding**: `cargo init`, SDL2 window, empty game loop, `assets/` dirs | S | — | NFR-1, NFR-2, NFR-4 | `cargo run` opens blank window; `cargo build` succeeds | A |
 | A02 | ✅ | **Quality gates**: `cargo test` harness, clippy/fmt notes in README | S | A01 | NFR-5 | `cargo test`; `cargo clippy`; `cargo fmt --check` | A |
 | A03 | ✅ | **Intersection render**: cross layout, road assets, lane ID registry stub | M | A01 | REQ-1, REQ-2, REQ-10 · AUD-1, AUD-2 | AUD-1, AUD-2 | A |
-| A04 | ⬜ | **Arrow-key spawn**: four cardinal approaches, `SpawnRequest` API | M | A03 | REQ-12–REQ-15 · AUD-3–AUD-6 | AUD-3–AUD-6 | A |
+| A04 | ✅ | **Arrow-key spawn**: four cardinal approaches, `SpawnRequest` API | M | A03 | REQ-12–REQ-15 · AUD-3–AUD-6 | AUD-3–AUD-6 | A |
 | A05 | ⬜ | **Spawn anti-spam**: per-direction cooldown | S | A04 | REQ-18 · AUD-27 | AUD-27 | A |
 | A06 | ⬜ | **`R` random spawn**: continuous random lane/route | S | A04 | REQ-16 · AUD-7 | AUD-7 | A |
 | A07 | ⬜ | **Turn animation**: sprite rotation along path tangent | M | A04, B02 🔗 | REQ-11 | Visual check; path alignment with AUD-28 | A |
@@ -169,9 +169,8 @@ No circular dependencies.
 
 | When | Pick up | Blocked by |
 |------|---------|------------|
-| ~~**Start**~~ | ~~**A01**~~ ✅ · ~~**A02**~~ ✅ · ~~**A03**~~ ✅ | — |
-| **Now** | **A04** (arrow-key spawn) | — |
-| After A04 ✅ | **A05** ∥ **A06** (parallel) | — |
+| ~~**Start**~~ | ~~**A01**~~ ✅ · ~~**A02**~~ ✅ · ~~**A03**~~ ✅ · ~~**A04**~~ ✅ | — |
+| **Now** | **A05** ∥ **A06** (spawn cooldown + R random) | — |
 | After B02 ✅ | **A07** | B02 🔗 |
 | Anytime after A03 ✅ | **A08** *(bonus)* | — |
 
@@ -179,8 +178,8 @@ No circular dependencies.
 
 | When | Pick up | Blocked by |
 |------|---------|------------|
-| While waiting | Read `docs/SDS.md` §13 stubs; draft `vehicle.rs` types offline | A04 |
-| After A04 ✅ | **B01** | A04 🔗 |
+| While waiting | Read `docs/SDS.md` §13 stubs; draft `vehicle.rs` types offline | — |
+| **Now** | **B01** | A04 ✅ |
 | After B01 ✅ + A03 ✅ | **B02** | A03 🔗 |
 | After B01 ✅ | **B03** ∥ **B04** (parallel) | — |
 | After B01 ✅ | **B05** *(bonus)* | — |
@@ -334,14 +333,13 @@ No circular dependencies.
 
 ### Dev A
 
-1. **A04** — arrow-key spawn (`SpawnRequest` API)
-2. **A03** ✅ · **A02** ✅ · **A01** ✅ — scaffolding + intersection render complete
+1. **A05** ∥ **A06** — spawn cooldown + R random spawn
+2. **A03** ✅ · **A02** ✅ · **A01** ✅ · **A04** ✅ — scaffolding through arrow-key spawn complete
 
 ### Dev B
 
-1. *(blocked)* — read SDS §13; prep `vehicle.rs` types
-2. **B01** — after **A04** ✅
-3. **B02** — after **B01** + **A03** ✅
+1. **B01** — vehicle physics (A04 ✅ unblocks)
+2. **B02** — after **B01** + **A03** ✅
 
 ### Dev C
 
