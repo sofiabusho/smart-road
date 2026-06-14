@@ -45,6 +45,15 @@ pub const APPROACH_ARM_LENGTH: f32 =
 /// East/west arm length from junction edge to left/right approach margin.
 pub const EW_ARM_LENGTH: f32 = INTERSECTION_CENTER_X - INTERSECTION_HALF_SIZE - APPROACH_MARGIN;
 
+/// Default cruise speed for newly spawned vehicles (world units per second).
+pub const DEFAULT_SPAWN_VELOCITY: f32 = 120.0;
+
+/// Vehicle sprite width in world units (pixels at 1:1 scale).
+pub const VEHICLE_WIDTH: f32 = 22.0;
+
+/// Vehicle sprite length in world units (pixels at 1:1 scale).
+pub const VEHICLE_LENGTH: f32 = 36.0;
+
 #[cfg(test)]
 mod tests {
     use super::*;

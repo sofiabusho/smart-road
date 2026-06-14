@@ -1,19 +1,19 @@
 //! SDL2 application shell and empty game loop.
 
 use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
 use sdl2::Sdl;
 
-use crate::config::{WINDOW_HEIGHT, WINDOW_TITLE, WINDOW_WIDTH};
-use crate::input::InputState;
+use crate::config::{FIXED_TIMESTEP_SECS, WINDOW_HEIGHT, WINDOW_TITLE, WINDOW_WIDTH};
+use crate::input::{InputEvent, InputState};
 use crate::intersection::IntersectionModel;
 use crate::render::{self, RoadAssets};
 use crate::smart::SmartController;
 use crate::spawn::SpawnSystem;
 use crate::stats::Stats;
+use crate::vehicle::snapshot_for_render;
 
 type WindowCanvas = Canvas<Window>;
 
@@ -22,7 +22,6 @@ pub struct App {
     _sdl: Sdl,
     running: bool,
     intersection: IntersectionModel,
-    #[allow(dead_code)]
     spawn: SpawnSystem,
     #[allow(dead_code)]
     smart: SmartController,
@@ -82,10 +81,6 @@ impl App {
         for event in pump.poll_iter() {
             match event {
                 Event::Quit { .. } => self.running = false,
-                Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    ..
-                } => self.running = false,
                 Event::KeyDown { keycode, .. } => {
                     self.input.on_key_down(keycode);
                 }
@@ -99,21 +94,38 @@ impl App {
     }
 
     fn update(&mut self) {
-        // Simulation update hooks land in B/C tracks (A03: presentation only).
-        let _ = (
-            &mut self.intersection,
-            &mut self.spawn,
-            &mut self.smart,
-            &mut self.stats,
-            &self.input,
-        );
+        for event in self.input.drain_events().collect::<Vec<_>>() {
+            match event {
+                InputEvent::SpawnCardinal(approach) => {
+                    self.spawn.spawn_on_approach(approach, &self.intersection);
+                }
+                InputEvent::RandomStream(_) => {
+                    // A06: continuous random spawn while R is held.
+                }
+                InputEvent::Exit => {
+                    // C06 replaces this with end_session + stats window.
+                    self.running = false;
+                }
+            }
+        }
+
+        self.spawn.update(FIXED_TIMESTEP_SECS);
+
+        let _ = (&mut self.smart, &mut self.stats, self.spawn.vehicles());
     }
 
     fn draw(&self, canvas: &mut WindowCanvas, road_assets: &RoadAssets<'_>) -> Result<(), String> {
         canvas.set_draw_color(Color::RGB(42, 90, 42));
         canvas.clear();
 
-        render::draw_frame(canvas, &self.intersection, road_assets)?;
+        let snapshots: Vec<_> = self
+            .spawn
+            .vehicles()
+            .iter()
+            .map(snapshot_for_render)
+            .collect();
+
+        render::draw_frame(canvas, &self.intersection, road_assets, &snapshots)?;
 
         canvas.present();
         Ok(())

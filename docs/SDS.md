@@ -330,8 +330,8 @@ Three developers work tracks **A**, **B**, and **C** per `docs/ticket-tracker.md
 | `config.rs` | **A** (A01) | B/C propose constants via ticket PR; A merges tunables |
 | `intersection.rs` | **A** (A03) + **B** (B02) | A owns topology + render-facing layout; B owns `path: Vec<Vec2>` per lane — separate impl blocks or `lane_paths` submodule |
 | `spawn.rs`, `input.rs` | **A** | |
-| `render.rs` | **A** (A03, A07) | Reads `Vehicle` snapshot only — no mutation |
-| `vehicle.rs` | **B** | |
+| `render.rs` | **A** (A03, A07) | Reads `VehicleRenderSnapshot` only — no mutation |
+| `vehicle.rs` | **B** (B01) | **A04 stub** (IF-1): `spawn_vehicle`, `approach` / `position` / `heading_rad` fields; B01 owns physics and `VehicleId` allocation |
 | `smart.rs` | **C** | |
 | `stats.rs`, `stats_window.rs` | **C** | |
 
@@ -347,6 +347,10 @@ pub enum Cardinal { North, South, East, West }
 pub enum Route { Right, Straight, Left }
 pub struct LaneId(pub u32);
 
+impl Cardinal {
+    pub const fn travel_heading(self) -> f32;  // A04: approach-aligned unit heading (radians)
+}
+
 pub struct LaneInfo {
     pub id: LaneId,
     pub approach: Cardinal,
@@ -360,20 +364,38 @@ pub struct IntersectionModel {
     pub zone_polygon: Vec<Vec2>,  // smart-system detection boundary (C01 reads)
 }
 
+// Shared render DTO (A04) — used by B snapshot_for_render and A draw_vehicle
+pub struct VehicleRenderSnapshot {
+    pub position: Vec2,
+    pub heading_rad: f32,
+    pub approach: Cardinal,  // A04: per-approach color/dims; A07 adds texture rotation from heading
+}
+
 // spawn.rs (A04)
 pub struct SpawnRequest {
     pub approach: Cardinal,
-    pub route: Route,       // random among r/s/l for approach
+    pub route: Route,       // rotates r→s→l per approach (PRD OQ-6)
     pub lane_id: LaneId,
 }
 
-pub fn try_spawn(req: SpawnRequest, cooldown: &SpawnCooldown) -> Option<VehicleId>;
+pub struct SpawnCooldown { /* A05: per-direction throttle */ }
+
+pub struct SpawnSystem { /* vehicles, route_counters, cooldown */ }
+
+impl SpawnSystem {
+    pub fn try_spawn(&mut self, req: SpawnRequest, model: &IntersectionModel) -> Option<VehicleId>;
+    pub fn spawn_on_approach(&mut self, approach: Cardinal, model: &IntersectionModel) -> Option<VehicleId>;
+    pub fn update(&mut self, dt: f32);  // A04 stub straight-line integrator; B01 replaces
+    pub fn vehicles(&self) -> &[Vehicle];
+}
 
 // input.rs (A04+)
+pub fn approach_for_arrow(key: Keycode) -> Option<Cardinal>;  // REQ-12–REQ-15
+
 pub enum InputEvent {
     SpawnCardinal(Cardinal),
-    RandomStream(bool),   // R key down/up
-    Exit,                 // Esc
+    RandomStream(bool),   // R key down/up (A06)
+    Exit,                 // Esc (C06)
 }
 
 // render.rs (A03, A07)
@@ -392,14 +414,9 @@ pub fn draw_frame(
     canvas: &mut Canvas,
     intersection: &IntersectionModel,
     assets: &RoadAssets<'_>,
+    vehicles: &[VehicleRenderSnapshot],  // A04
 );
 pub fn draw_vehicle(canvas: &mut Canvas, snapshot: &VehicleRenderSnapshot);
-
-pub struct VehicleRenderSnapshot {
-    pub position: Vec2,
-    pub heading_rad: f32,
-    pub texture_id: u32,
-}
 ```
 
 ### 13.3 Track B exports (vehicle simulation)
@@ -407,28 +424,29 @@ pub struct VehicleRenderSnapshot {
 Delivered by **B01**–**B04**; **B01** can start when A04's `SpawnRequest` stub exists.
 
 ```rust
-// vehicle.rs
+// vehicle.rs — A04 IF-1 stub fields; B01 expands physics
 pub struct VehicleId(pub u64);
 
 pub struct Vehicle {
     pub id: VehicleId,
     pub lane_id: LaneId,
     pub route: Route,
-    pub position: Vec2,
-    pub heading_rad: f32,
-    pub path_index: usize,
+    pub approach: Cardinal,       // A04 stub
+    pub position: Vec2,           // A04 stub; B01 integrates
+    pub heading_rad: f32,         // A04 stub
     pub velocity: f32,
-    pub distance_in_crossing: f32,
-    pub time_in_crossing: f32,
     pub state: VehicleState,
+    // B01+: path_index, distance_in_crossing, time_in_crossing
+    // IF-2: commanded_velocity (B01 field; C writes in Managed state)
 }
 
 pub enum VehicleState { Approaching, Managed, Exiting, Done }
 
 pub enum VelocityLevel { Fast, Cruise, Yield }  // ≥3 levels (B03)
 
-pub fn integrate_physics(vehicle: &mut Vehicle, dt: f32);
-pub fn snapshot_for_render(vehicle: &Vehicle) -> VehicleRenderSnapshot;
+pub fn spawn_vehicle(id: VehicleId, lane: &LaneInfo, velocity: f32) -> Vehicle;  // A04 IF-1 stub
+pub fn integrate_physics(vehicle: &mut Vehicle, dt: f32);  // B01
+pub fn snapshot_for_render(vehicle: &Vehicle) -> VehicleRenderSnapshot;  // A04 stub; uses intersection::VehicleRenderSnapshot
 
 // B02 — route adherence
 pub fn attach_paths(model: &mut IntersectionModel, paths: LanePathMap);
@@ -501,7 +519,7 @@ pub fn end_session(app: &mut App) -> SessionSummary;
 
 | ID | Question | Proposed default |
 |----|----------|------------------|
-| IF-1 | Who allocates `VehicleId`? | **B** (`vehicle.rs`) on spawn; A's `try_spawn` calls B factory |
+| IF-1 | Who allocates `VehicleId`? | **B** (`vehicle.rs`) on spawn; **A04 interim**: `SpawnSystem::try_spawn` allocates id and passes to `spawn_vehicle`; B01 moves allocation to B |
 | IF-2 | `commanded_velocity` field on `Vehicle`? | Add in **B01**; write access **C only** in `Managed` state |
 | IF-3 | `intersection.rs` split pattern? | Single file, `mod topology` (A) + `mod paths` (B) to reduce merge pain |
 | IF-4 | Stats window: second SDL window vs overlay? | **C** owns; default second window per PRD OQ-4 |
