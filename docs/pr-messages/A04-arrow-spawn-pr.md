@@ -13,7 +13,7 @@ Implements **arrow-key vehicle spawning** from all four cardinal approaches with
 - **`src/spawn.rs`**: `SpawnRequest` (approach, route, lane_id), `SpawnCooldown` stub, `SpawnSystem::try_spawn` / `spawn_on_approach`, route rotation (r→s→l), stub straight-line integrator, unit tests for all four travel directions.
 - **`src/input.rs`**: `approach_for_arrow` mapping (Up→South, Down→North, Right→West, Left→East), `InputEvent::SpawnCardinal`, key-down event dispatch.
 - **`src/vehicle.rs`**: `spawn_vehicle` factory (IF-1 stub), `position`/`heading_rad`/`approach` fields, `snapshot_for_render`.
-- **`src/intersection.rs`**: `Cardinal::travel_heading()` for approach-aligned motion.
+- **`src/intersection.rs`**: `Cardinal::travel_heading()`, shared `VehicleRenderSnapshot` DTO (decouples B from A render types).
 - **`src/render.rs`**: `draw_vehicle` (colored oriented rects per approach), `draw_frame` accepts vehicle snapshots.
 - **`src/app.rs`**: spawn on input events, `SpawnSystem::update` each frame, render active vehicles.
 - **`src/config.rs`**: `DEFAULT_SPAWN_VELOCITY`, `VEHICLE_WIDTH`, `VEHICLE_LENGTH`.
@@ -25,7 +25,8 @@ Implements **arrow-key vehicle spawning** from all four cardinal approaches with
 - **SpawnCooldown stub**: `allows()` always returns `true` until **A05** adds per-direction throttle (REQ-18 / AUD-27).
 - **Straight-line stub motion**: Vehicles move along `Cardinal::travel_heading()` at `DEFAULT_SPAWN_VELOCITY` until off-screen. **B01** replaces integrator; **B02** adds lane polylines.
 - **Colored rects vs sprites**: A04 draws distinct per-approach rectangles (no vehicle BMP yet). **A07** adds sprite rotation.
-- **Minimal `vehicle.rs` touch**: Only the IF-1 spawn factory stub — no B01 physics, safe distance, or path adherence.
+- **Minimal `vehicle.rs` touch**: Only the IF-1 spawn factory stub — no B01 physics, safe distance, or path adherence. `VehicleRenderSnapshot` lives in `intersection.rs` so B does not depend on A `render.rs`.
+- **`docs/SDS.md` §13**: Updated §13.1–§13.3 and IF-1 for A04 API (`SpawnSystem`, `draw_frame` vehicles param, `Vehicle` stub fields).
 
 ## Verification Results
 
