@@ -100,7 +100,7 @@ impl SpawnSystem {
             if vehicle.state == VehicleState::Done {
                 continue;
             }
-            crate::vehicle::update_physics(vehicle, dt);
+            crate::vehicle::integrate_physics(vehicle, dt);
             if is_off_screen(vehicle.position) {
                 vehicle.state = VehicleState::Done;
             }

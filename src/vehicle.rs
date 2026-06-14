@@ -25,6 +25,7 @@ pub struct Vehicle {
     pub position: Vec2,
     pub heading_rad: f32,
     pub velocity: f32,
+    pub commanded_velocity: f32,
     pub state: VehicleState,
     pub path_index: usize,
     pub distance_in_crossing: f32,
@@ -41,6 +42,7 @@ pub fn spawn_vehicle(id: VehicleId, lane: &LaneInfo, velocity: f32) -> Vehicle {
         position: lane.spawn_point,
         heading_rad: lane.approach.travel_heading(),
         velocity,
+        commanded_velocity: velocity,
         state: VehicleState::Approaching,
         path_index: 0,
         distance_in_crossing: 0.0,
@@ -58,7 +60,7 @@ pub fn snapshot_for_render(vehicle: &Vehicle) -> VehicleRenderSnapshot {
 }
 
 /// Update vehicle physics: advance position and accumulate crossing metrics (B01).
-pub fn update_physics(vehicle: &mut Vehicle, dt: f32) {
+pub fn integrate_physics(vehicle: &mut Vehicle, dt: f32) {
     if vehicle.state == VehicleState::Done {
         return;
     }
