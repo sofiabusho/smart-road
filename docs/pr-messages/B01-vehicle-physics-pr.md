@@ -6,16 +6,18 @@ title: "feat(B01): vehicle physics"
 
 ## Summary
 
-Implements **vehicle physics foundation** for autonomous vehicle simulation with position integration and crossing-time metrics per SDS §13.3. Vehicles now track path progress (`path_index`), distance traveled inside the junction (`distance_in_crossing`), and time spent crossing (`time_in_crossing`). Physics update moved from spawn.rs stub to dedicated `vehicle.rs::update_physics()` function. Lays groundwork for **B02** (route adherence) and **B03–B04** (velocity levels, safe distance). Satisfies **REQ-5** and builds toward **AUD-26**.
+Implements **vehicle physics foundation** for autonomous vehicle simulation with position integration and crossing-time metrics per SDS §13.3. Vehicles now track path progress (`path_index`), distance traveled inside the junction (`distance_in_crossing`), and time spent crossing (`time_in_crossing`). Physics update function renamed to `integrate_physics()` per spec; new `commanded_velocity` field added to Vehicle struct (initialized to spawn velocity; Track C writes this in Managed state for smart coordination). Lays groundwork for **B02** (route adherence) and **B03–B04** (velocity levels, safe distance). Satisfies **REQ-5** and builds toward **AUD-26**.
 
 ## Key Changes
 
-- **`src/vehicle.rs`**: Added three fields to `Vehicle` struct (`path_index: usize`, `distance_in_crossing: f32`, `time_in_crossing: f32`); updated `spawn_vehicle()` factory to initialize all three to zero values; new `update_physics(vehicle: &mut Vehicle, dt: f32)` function for physics integration and crossing metric accumulation.
-- **`src/spawn.rs`**: Replaced `advance_straight_stub(vehicle, dt)` call in `SpawnSystem::update()` with `crate::vehicle::update_physics(vehicle, dt)`. Kept `advance_straight_stub()` function in file (unused) to preserve existing test compatibility.
+- **`src/vehicle.rs`**: Added four fields to `Vehicle` struct (`path_index: usize`, `distance_in_crossing: f32`, `time_in_crossing: f32`, `commanded_velocity: f32`); updated `spawn_vehicle()` factory to initialize all fields (commanded_velocity initialized to spawn velocity); new `integrate_physics(vehicle: &mut Vehicle, dt: f32)` function for physics integration and crossing metric accumulation.
+- **`src/spawn.rs`**: Updated `SpawnSystem::update()` to call `crate::vehicle::integrate_physics(vehicle, dt)`. Kept `advance_straight_stub()` function in file (unused) to preserve existing test compatibility.
+- **SDS §13.3 alignment**: Renamed `update_physics` to `integrate_physics` to match spec. Added `commanded_velocity: f32` field per IF-2 (B01 field; Track C writes in Managed state).
 
 ## Technical Decisions
 
-- **Physics location**: Moved from spawn.rs stub to vehicle.rs module per SDS §13.1 file ownership (B01 owns vehicle.rs). Keeps physics logic colocated with Vehicle state.
+- **Physics location & naming**: Moved from spawn.rs stub to vehicle.rs module per SDS §13.1 file ownership (B01 owns vehicle.rs). Function renamed to `integrate_physics()` per SDS §13.3 spec. Keeps physics logic colocated with Vehicle state.
+- **Commanded velocity field**: Added `commanded_velocity: f32` per SDS §13.3 IF-2 (open interface decision). Initialized to spawn velocity in `spawn_vehicle()`; Track C writes to this field when vehicle enters Managed state for smart coordination.
 - **Crossing metrics only in Managed state**: `time_in_crossing` and `distance_in_crossing` increments only occur when vehicle.state == Managed. This prepares for C01 smart-system detection to transition vehicles to Managed on zone entry. Approaching vehicles accumulate zero crossing metrics.
 - **Distance calculation**: Uses Euclidean distance `sqrt(dx² + dy²)` from velocity and heading; accounts for heading direction even during turns (B02 will replace with path-based motion).
 - **Backward compatibility**: `advance_straight_stub()` remains (unused but present) so any downstream code referencing it or tests depending on its existence do not break; will be removed in B02 or later when motion is fully replaced by path integration.
