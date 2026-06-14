@@ -38,6 +38,16 @@ impl Cardinal {
             Self::West => 3,
         }
     }
+
+    /// Unit heading (radians) for straight travel from this approach into the junction.
+    pub const fn travel_heading(self) -> f32 {
+        match self {
+            Self::North => std::f32::consts::FRAC_PI_2,
+            Self::South => -std::f32::consts::FRAC_PI_2,
+            Self::East => std::f32::consts::PI,
+            Self::West => 0.0,
+        }
+    }
 }
 
 /// Fixed lane route through the intersection.
