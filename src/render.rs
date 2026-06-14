@@ -119,7 +119,7 @@ pub fn draw_vehicle(
     canvas: &mut Canvas<Window>,
     snapshot: &VehicleRenderSnapshot,
 ) -> Result<(), String> {
-    let (w, h) = vehicle_dimensions(snapshot.approach);
+    let (w, h) = vehicle_dimensions_from_heading(snapshot.heading_rad);
     let half_w = w / 2;
     let half_h = h / 2;
     let cx = snapshot.position.x.round() as i32;
@@ -133,14 +133,12 @@ pub fn draw_vehicle(
     Ok(())
 }
 
-fn vehicle_dimensions(approach: Cardinal) -> (i32, i32) {
-    match approach {
-        Cardinal::North | Cardinal::South => {
-            (VEHICLE_WIDTH.round() as i32, VEHICLE_LENGTH.round() as i32)
-        }
-        Cardinal::East | Cardinal::West => {
-            (VEHICLE_LENGTH.round() as i32, VEHICLE_WIDTH.round() as i32)
-        }
+fn vehicle_dimensions_from_heading(heading_rad: f32) -> (i32, i32) {
+    let ew_oriented = heading_rad.cos().abs() > heading_rad.sin().abs();
+    if ew_oriented {
+        (VEHICLE_LENGTH.round() as i32, VEHICLE_WIDTH.round() as i32)
+    } else {
+        (VEHICLE_WIDTH.round() as i32, VEHICLE_LENGTH.round() as i32)
     }
 }
 
@@ -177,8 +175,8 @@ mod tests {
 
     #[test]
     fn vehicle_dimensions_swap_for_ew_approaches() {
-        let (ns_w, ns_h) = vehicle_dimensions(Cardinal::South);
-        let (ew_w, ew_h) = vehicle_dimensions(Cardinal::West);
+        let (ns_w, ns_h) = vehicle_dimensions_from_heading(Cardinal::South.travel_heading());
+        let (ew_w, ew_h) = vehicle_dimensions_from_heading(Cardinal::West.travel_heading());
         assert_eq!(ns_w, ew_h);
         assert_eq!(ns_h, ew_w);
     }
