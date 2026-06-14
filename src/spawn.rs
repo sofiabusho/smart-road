@@ -100,7 +100,7 @@ impl SpawnSystem {
             if vehicle.state == VehicleState::Done {
                 continue;
             }
-            advance_straight_stub(vehicle, dt);
+            crate::vehicle::update_physics(vehicle, dt);
             if is_off_screen(vehicle.position) {
                 vehicle.state = VehicleState::Done;
             }
