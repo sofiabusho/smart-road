@@ -2,13 +2,16 @@
 
 use std::path::Path;
 
+use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::render::{Canvas, Texture, TextureCreator};
 use sdl2::surface::Surface;
 use sdl2::video::{Window, WindowContext};
 
-use crate::config::{INTERSECTION_CENTER_X, INTERSECTION_CENTER_Y, ROAD_WIDTH};
-use crate::intersection::IntersectionModel;
+use crate::config::{
+    INTERSECTION_CENTER_X, INTERSECTION_CENTER_Y, ROAD_WIDTH, VEHICLE_LENGTH, VEHICLE_WIDTH,
+};
+use crate::intersection::{Cardinal, IntersectionModel};
 
 const ROAD_ASSET_DIR: &str = "assets/roads";
 
@@ -97,30 +100,65 @@ pub fn draw_intersection(
     Ok(())
 }
 
-/// Draw one frame (intersection + vehicles). A03: intersection assets; A07: vehicles.
+/// Draw one frame (intersection + vehicles). A03: intersection; A04: vehicle rects; A07: sprites.
 pub fn draw_frame(
     canvas: &mut Canvas<Window>,
     intersection: &IntersectionModel,
     assets: &RoadAssets<'_>,
+    vehicles: &[VehicleRenderSnapshot],
 ) -> Result<(), String> {
     draw_intersection(canvas, intersection, assets)?;
+    for snapshot in vehicles {
+        draw_vehicle(canvas, snapshot)?;
+    }
     Ok(())
 }
 
-/// Vehicle render snapshot (A07).
+/// Vehicle render snapshot (A04: position + heading; A07: texture rotation).
 #[derive(Debug, Clone, Copy)]
 pub struct VehicleRenderSnapshot {
     pub position: crate::intersection::Vec2,
     pub heading_rad: f32,
-    pub texture_id: u32,
+    pub approach: Cardinal,
 }
 
-/// Draw a single vehicle sprite (A07 stub).
+/// Draw a single vehicle as a colored oriented rectangle (A04; A07 adds sprite rotation).
 pub fn draw_vehicle(
-    _canvas: &mut Canvas<Window>,
-    _snapshot: &VehicleRenderSnapshot,
+    canvas: &mut Canvas<Window>,
+    snapshot: &VehicleRenderSnapshot,
 ) -> Result<(), String> {
+    let (w, h) = vehicle_dimensions(snapshot.approach);
+    let half_w = w / 2;
+    let half_h = h / 2;
+    let cx = snapshot.position.x.round() as i32;
+    let cy = snapshot.position.y.round() as i32;
+
+    canvas.set_draw_color(vehicle_color(snapshot.approach));
+    let rect = Rect::new(cx - half_w, cy - half_h, w as u32, h as u32);
+    canvas
+        .fill_rect(rect)
+        .map_err(|e| format!("draw vehicle: {e}"))?;
     Ok(())
+}
+
+fn vehicle_dimensions(approach: Cardinal) -> (i32, i32) {
+    match approach {
+        Cardinal::North | Cardinal::South => {
+            (VEHICLE_WIDTH.round() as i32, VEHICLE_LENGTH.round() as i32)
+        }
+        Cardinal::East | Cardinal::West => {
+            (VEHICLE_LENGTH.round() as i32, VEHICLE_WIDTH.round() as i32)
+        }
+    }
+}
+
+fn vehicle_color(approach: Cardinal) -> Color {
+    match approach {
+        Cardinal::South => Color::RGB(230, 70, 70),
+        Cardinal::North => Color::RGB(70, 130, 230),
+        Cardinal::West => Color::RGB(240, 180, 40),
+        Cardinal::East => Color::RGB(60, 190, 90),
+    }
 }
 
 #[cfg(test)]
@@ -143,5 +181,13 @@ mod tests {
         assert!(INTERSECTION_CENTER_X as i32 + half + ew_arm <= WINDOW_WIDTH as i32);
         assert!(INTERSECTION_CENTER_Y as i32 - half - ns_arm >= 0);
         assert!(INTERSECTION_CENTER_Y as i32 + half + ns_arm <= WINDOW_HEIGHT as i32);
+    }
+
+    #[test]
+    fn vehicle_dimensions_swap_for_ew_approaches() {
+        let (ns_w, ns_h) = vehicle_dimensions(Cardinal::South);
+        let (ew_w, ew_h) = vehicle_dimensions(Cardinal::West);
+        assert_eq!(ns_w, ew_h);
+        assert_eq!(ns_h, ew_w);
     }
 }
