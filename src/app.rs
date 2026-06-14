@@ -1,7 +1,6 @@
 //! SDL2 application shell and empty game loop.
 
 use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
@@ -82,10 +81,6 @@ impl App {
         for event in pump.poll_iter() {
             match event {
                 Event::Quit { .. } => self.running = false,
-                Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    ..
-                } => self.running = false,
                 Event::KeyDown { keycode, .. } => {
                     self.input.on_key_down(keycode);
                 }
@@ -108,7 +103,8 @@ impl App {
                     // A06: continuous random spawn while R is held.
                 }
                 InputEvent::Exit => {
-                    // C06: end session and open stats window.
+                    // C06 replaces this with end_session + stats window.
+                    self.running = false;
                 }
             }
         }
