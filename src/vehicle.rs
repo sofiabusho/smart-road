@@ -72,8 +72,104 @@ pub fn integrate_physics(vehicle: &mut Vehicle, dt: f32) {
     vehicle.position.x += dx;
     vehicle.position.y += dy;
 
-    if vehicle.state == VehicleState::Managed {
+    if vehicle.state == VehicleState::Managed || vehicle.state == VehicleState::Exiting {
         vehicle.time_in_crossing += dt;
         vehicle.distance_in_crossing += distance_moved;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn integrate_physics_does_not_accumulate_crossing_metrics_when_approaching() {
+        let mut vehicle = Vehicle {
+            id: VehicleId(1),
+            lane_id: crate::intersection::LaneId(0),
+            route: crate::intersection::Route::Straight,
+            approach: crate::intersection::Cardinal::South,
+            position: Vec2 { x: 100.0, y: 100.0 },
+            heading_rad: 0.0,
+            velocity: 50.0,
+            commanded_velocity: 50.0,
+            state: VehicleState::Approaching,
+            path_index: 0,
+            distance_in_crossing: 0.0,
+            time_in_crossing: 0.0,
+        };
+
+        integrate_physics(&mut vehicle, 0.1);
+
+        assert_eq!(
+            vehicle.distance_in_crossing, 0.0,
+            "distance should not accumulate when Approaching"
+        );
+        assert_eq!(
+            vehicle.time_in_crossing, 0.0,
+            "time should not accumulate when Approaching"
+        );
+        assert!(
+            vehicle.position.x > 100.0,
+            "position should change despite no metric accumulation"
+        );
+    }
+
+    #[test]
+    fn integrate_physics_accumulates_crossing_metrics_when_managed() {
+        let mut vehicle = Vehicle {
+            id: VehicleId(2),
+            lane_id: crate::intersection::LaneId(0),
+            route: crate::intersection::Route::Straight,
+            approach: crate::intersection::Cardinal::South,
+            position: Vec2 { x: 200.0, y: 200.0 },
+            heading_rad: 0.0,
+            velocity: 50.0,
+            commanded_velocity: 50.0,
+            state: VehicleState::Managed,
+            path_index: 0,
+            distance_in_crossing: 0.0,
+            time_in_crossing: 0.0,
+        };
+
+        integrate_physics(&mut vehicle, 0.1);
+
+        assert!(
+            vehicle.distance_in_crossing > 0.0,
+            "distance should accumulate when Managed"
+        );
+        assert_eq!(
+            vehicle.time_in_crossing, 0.1,
+            "time should accumulate by dt when Managed"
+        );
+    }
+
+    #[test]
+    fn integrate_physics_accumulates_crossing_metrics_when_exiting() {
+        let mut vehicle = Vehicle {
+            id: VehicleId(3),
+            lane_id: crate::intersection::LaneId(0),
+            route: crate::intersection::Route::Straight,
+            approach: crate::intersection::Cardinal::South,
+            position: Vec2 { x: 300.0, y: 300.0 },
+            heading_rad: 0.0,
+            velocity: 50.0,
+            commanded_velocity: 50.0,
+            state: VehicleState::Exiting,
+            path_index: 0,
+            distance_in_crossing: 0.0,
+            time_in_crossing: 0.0,
+        };
+
+        integrate_physics(&mut vehicle, 0.1);
+
+        assert!(
+            vehicle.distance_in_crossing > 0.0,
+            "distance should accumulate when Exiting"
+        );
+        assert_eq!(
+            vehicle.time_in_crossing, 0.1,
+            "time should accumulate by dt when Exiting"
+        );
     }
 }

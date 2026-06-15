@@ -122,17 +122,6 @@ impl Default for SpawnSystem {
     }
 }
 
-/// A04 stub integrator — straight-line motion until B01/B02 path physics land.
-fn advance_straight_stub(vehicle: &mut Vehicle, dt: f32) {
-    if vehicle.state == VehicleState::Done {
-        return;
-    }
-    let dx = vehicle.velocity * dt * vehicle.heading_rad.cos();
-    let dy = vehicle.velocity * dt * vehicle.heading_rad.sin();
-    vehicle.position.x += dx;
-    vehicle.position.y += dy;
-}
-
 /// True when the vehicle center is well outside the window bounds.
 fn is_off_screen(position: Vec2) -> bool {
     const MARGIN: f32 = 64.0;
