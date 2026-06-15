@@ -1,5 +1,7 @@
 //! Cross intersection topology (lane registry — A03; path polylines — B02).
 
+use std::collections::HashMap;
+
 use crate::config::{
     APPROACH_MARGIN, INTERSECTION_CENTER_X, INTERSECTION_CENTER_Y, INTERSECTION_HALF_SIZE,
     LANES_PER_APPROACH, LANE_WIDTH,
@@ -81,7 +83,11 @@ pub struct LaneInfo {
     pub approach: Cardinal,
     pub route: Route,
     pub spawn_point: Vec2,
+    pub path: Vec<Vec2>,
 }
+
+/// Map from lane id to its path polyline.
+pub type LanePathMap = HashMap<LaneId, Vec<Vec2>>;
 
 /// Render-facing vehicle snapshot (A04; shared by B `snapshot_for_render` and A `draw_vehicle`).
 #[derive(Debug, Clone, Copy)]
@@ -103,10 +109,13 @@ impl IntersectionModel {
     pub fn new() -> Self {
         let lanes = build_lane_registry();
         let zone_polygon = junction_zone_polygon();
-        Self {
+        let mut model = Self {
             lanes,
             zone_polygon,
-        }
+        };
+        let paths = build_all_lane_paths();
+        attach_paths(&mut model, paths);
+        model
     }
 
     /// Lookup lane by stable id.
@@ -144,10 +153,141 @@ fn build_lane_registry() -> Vec<LaneInfo> {
                 approach,
                 route,
                 spawn_point: spawn_point_for(approach, route),
+                path: Vec::new(),
             });
         }
     }
     lanes
+}
+
+pub fn attach_paths(model: &mut IntersectionModel, paths: LanePathMap) {
+    for lane in &mut model.lanes {
+        if let Some(path) = paths.get(&lane.id) {
+            lane.path = path.clone();
+        }
+    }
+}
+
+fn build_all_lane_paths() -> LanePathMap {
+    let mut map = HashMap::with_capacity(12);
+
+    // North approach (travels south)
+    map.insert(
+        lane_id(Cardinal::North, Route::Right),
+        vec![
+            Vec2::new(472.0, 48.0),
+            Vec2::new(472.0, 324.0),
+            Vec2::new(452.0, 344.0),
+            Vec2::new(-64.0, 344.0),
+        ],
+    );
+    map.insert(
+        lane_id(Cardinal::North, Route::Straight),
+        vec![
+            Vec2::new(472.0, 48.0),
+            Vec2::new(472.0, 324.0),
+            Vec2::new(472.0, 444.0),
+            Vec2::new(472.0, 832.0),
+        ],
+    );
+    map.insert(
+        lane_id(Cardinal::North, Route::Left),
+        vec![
+            Vec2::new(472.0, 48.0),
+            Vec2::new(472.0, 324.0),
+            Vec2::new(572.0, 344.0),
+            Vec2::new(1088.0, 344.0),
+        ],
+    );
+
+    // South approach (travels north)
+    map.insert(
+        lane_id(Cardinal::South, Route::Right),
+        vec![
+            Vec2::new(552.0, 720.0),
+            Vec2::new(552.0, 444.0),
+            Vec2::new(572.0, 424.0),
+            Vec2::new(1088.0, 424.0),
+        ],
+    );
+    map.insert(
+        lane_id(Cardinal::South, Route::Straight),
+        vec![
+            Vec2::new(552.0, 720.0),
+            Vec2::new(552.0, 444.0),
+            Vec2::new(552.0, 324.0),
+            Vec2::new(552.0, -64.0),
+        ],
+    );
+    map.insert(
+        lane_id(Cardinal::South, Route::Left),
+        vec![
+            Vec2::new(552.0, 720.0),
+            Vec2::new(552.0, 444.0),
+            Vec2::new(452.0, 424.0),
+            Vec2::new(-64.0, 424.0),
+        ],
+    );
+
+    // East approach (travels west)
+    map.insert(
+        lane_id(Cardinal::East, Route::Right),
+        vec![
+            Vec2::new(976.0, 424.0),
+            Vec2::new(572.0, 424.0),
+            Vec2::new(552.0, 444.0),
+            Vec2::new(552.0, 832.0),
+        ],
+    );
+    map.insert(
+        lane_id(Cardinal::East, Route::Straight),
+        vec![
+            Vec2::new(976.0, 424.0),
+            Vec2::new(572.0, 424.0),
+            Vec2::new(452.0, 424.0),
+            Vec2::new(-64.0, 424.0),
+        ],
+    );
+    map.insert(
+        lane_id(Cardinal::East, Route::Left),
+        vec![
+            Vec2::new(976.0, 424.0),
+            Vec2::new(572.0, 424.0),
+            Vec2::new(552.0, 324.0),
+            Vec2::new(552.0, -64.0),
+        ],
+    );
+
+    // West approach (travels east)
+    map.insert(
+        lane_id(Cardinal::West, Route::Right),
+        vec![
+            Vec2::new(48.0, 344.0),
+            Vec2::new(452.0, 344.0),
+            Vec2::new(472.0, 324.0),
+            Vec2::new(472.0, -64.0),
+        ],
+    );
+    map.insert(
+        lane_id(Cardinal::West, Route::Straight),
+        vec![
+            Vec2::new(48.0, 344.0),
+            Vec2::new(452.0, 344.0),
+            Vec2::new(572.0, 344.0),
+            Vec2::new(1088.0, 344.0),
+        ],
+    );
+    map.insert(
+        lane_id(Cardinal::West, Route::Left),
+        vec![
+            Vec2::new(48.0, 344.0),
+            Vec2::new(452.0, 344.0),
+            Vec2::new(472.0, 444.0),
+            Vec2::new(472.0, 832.0),
+        ],
+    );
+
+    map
 }
 
 fn spawn_point_for(approach: Cardinal, route: Route) -> Vec2 {
