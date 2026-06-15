@@ -8,12 +8,21 @@ title: "feat(B02): route adherence"
 
 Implements **route adherence** for autonomous vehicles per SDS §13.3. Each of the 12 lanes now carries a 4-waypoint polyline (`spawn → junction_entry → junction_exit → off_screen`); vehicles follow their assigned polyline every frame via `advance_along_path()`, which carries remainder distance across segment boundaries and keeps `heading_rad` aligned to the current segment. Satisfies **REQ-6** (vehicles follow their designated route through the intersection) and closes the path-following gap left by **B01**.
 
-## Key Changes
+## Implementation Traceability
 
-- **`src/intersection.rs`**: Added `path: Vec<Vec2>` field to `LaneInfo` (line 86); `LanePathMap` type alias (line 90); `attach_paths(model, paths)` public function (line 163) that writes path vecs into each lane by id; private `build_all_lane_paths()` (line 171) with hardcoded 4-point polylines for all 12 lanes (North/South/East/West × Right/Straight/Left); `IntersectionModel::new()` updated to call both so paths are ready at startup.
-- **`src/vehicle.rs`**: `advance_along_path(vehicle, model, dt)` (line 84) — looks up the lane path, iterates segments moving `velocity × dt` units, carries remainder across waypoints, sets `heading_rad = seg_dy.atan2(seg_dx)` on every segment update, stops at final waypoint. New test `advance_along_path_follows_waypoints_and_updates_heading` (line 225).
-- **`src/spawn.rs`**: `SpawnSystem::update()` signature extended to `update(&mut self, model: &IntersectionModel, dt: f32)` (line 98); now calls `integrate_physics` then `advance_along_path` each frame. Four existing directional tests updated to pass `&IntersectionModel::new()` (lines 179–219).
-- **`src/app.rs`**: `self.spawn.update(FIXED_TIMESTEP_SECS)` updated to `self.spawn.update(&self.intersection, FIXED_TIMESTEP_SECS)`.
+| Requirement | What it requires | File | Location | What was added |
+|-------------|-----------------|------|----------|----------------|
+| REQ-6 | Vehicles follow designated route | `src/intersection.rs` | line 86 | `pub path: Vec<Vec2>` field on `LaneInfo` |
+| SDS §13.3 | `LanePathMap` type exported | `src/intersection.rs` | line 90 | `pub type LanePathMap = HashMap<LaneId, Vec<Vec2>>` |
+| REQ-2, REQ-6 | All 12 lane polylines defined | `src/intersection.rs` | line 171 | `fn build_all_lane_paths() -> LanePathMap` — 4-waypoint paths for North/South/East/West × Right/Straight/Left |
+| SDS §13.3 | `attach_paths()` exported | `src/intersection.rs` | line 163 | `pub fn attach_paths(model: &mut IntersectionModel, paths: LanePathMap)` — writes paths into lanes by id |
+| REQ-6 | Paths ready at startup | `src/intersection.rs` | lines 116–117 | `IntersectionModel::new()` calls `build_all_lane_paths()` then `attach_paths()` before returning |
+| REQ-6, SDS §13.3 | Vehicles move along polyline | `src/vehicle.rs` | line 84 | `pub fn advance_along_path(vehicle: &mut Vehicle, model: &IntersectionModel, dt: f32)` — segment iteration with remainder carry-over |
+| REQ-11 (A07 prep) | Sprite rotation follows path tangent | `src/vehicle.rs` | line 109 | `vehicle.heading_rad = seg_dy.atan2(seg_dx)` — updated on every segment transition |
+| SDS §13.3 | `SpawnSystem::update()` accepts model | `src/spawn.rs` | line 98 | Signature changed from `update(&mut self, dt: f32)` to `update(&mut self, model: &IntersectionModel, dt: f32)` |
+| REQ-6 | Path-following called each frame | `src/spawn.rs` | line 104 | `crate::vehicle::advance_along_path(vehicle, model, dt)` called after `integrate_physics` in update loop |
+| Integration | App passes model to spawn | `src/app.rs` | line 112 | `self.spawn.update(&self.intersection, FIXED_TIMESTEP_SECS)` |
+| AUD-28 | Path-following verified by test | `src/vehicle.rs` | line 225 | `advance_along_path_follows_waypoints_and_updates_heading` — asserts position advances along segment and `heading_rad` equals 0 for a horizontal path |
 
 ## Technical Decisions
 
