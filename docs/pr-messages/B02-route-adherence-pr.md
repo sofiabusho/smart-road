@@ -6,99 +6,123 @@ title: "feat(B02): route adherence"
 
 ## Summary
 
-Implements **route adherence** for autonomous vehicles per SDS §13.3. Each of the 12 lanes now carries a 4-waypoint polyline (`spawn → junction_entry → junction_exit → off_screen`); vehicles follow their assigned polyline every frame via `advance_along_path()`, which carries remainder distance across segment boundaries and keeps `heading_rad` aligned to the current segment. Satisfies **REQ-6** (vehicles follow their designated route through the intersection) and closes the path-following gap left by **B01**.
+Implements **route adherence** for all 12 lanes per SDS §13.3. Each `LaneInfo` now carries a 4-waypoint polyline (`spawn → junction_entry → junction_exit → off_screen`); `advance_along_path()` moves the vehicle along that polyline each frame with remainder carry-over across segment boundaries and `heading_rad` tracking the current segment tangent. Satisfies **REQ-2** (three distinct routes per approach) and **REQ-6** (vehicles follow their designated route with no lane changes).
+
+Two geometry bugs were found and fixed during review (see Per-Lane Geometry Table):
+
+1. **path[0] mismatch** — all three routes per approach shared the left-lane hardcoded coordinate as `path[0]`; fixed by calling `spawn_point_for(approach, route)` for every lane.
+2. **Approach-segment drift** — `path[1]` also used the left-lane coordinate, so right/straight vehicles drifted laterally on the approach arm; fixed by deriving `path[1]` from the same per-lane x/y offset and the junction-edge constant.
 
 ## Key Changes
 
-- **`src/intersection.rs`** — Added `pub path: Vec<Vec2>` to `LaneInfo`; implemented `build_all_lane_paths()` (12 four-waypoint polylines, `path[0]` computed from `spawn_point_for()`) and `attach_paths()` called at startup.
-- **`src/vehicle.rs`** — Implemented `advance_along_path()` with per-segment remainder carry-over and `heading_rad` tangent update; `snapshot_for_render` reads updated heading.
-- **`src/spawn.rs`** — Updated `SpawnSystem::update` signature to accept `&IntersectionModel`; calls `advance_along_path` each frame (cross-track edit, see Cross-Track Changes).
-- **`src/app.rs`** — Updated `spawn.update()` call site to pass `&self.intersection` (cross-track edit, mechanical follow-on from spawn.rs change).
-
-## Implementation Traceability
-
-| Requirement | What it requires | File | Location | What was added |
-|-------------|-----------------|------|----------|----------------|
-| REQ-6 | Vehicles follow designated route | `src/intersection.rs` | line 86 | `pub path: Vec<Vec2>` field on `LaneInfo` |
-| SDS §13.3 | `LanePathMap` type exported | `src/intersection.rs` | line 90 | `pub type LanePathMap = HashMap<LaneId, Vec<Vec2>>` |
-| REQ-2, REQ-6 | All 12 lane polylines defined | `src/intersection.rs` | line 171 | `fn build_all_lane_paths() -> LanePathMap` — 4-waypoint paths for North/South/East/West × Right/Straight/Left |
-| SDS §13.3 | `attach_paths()` exported | `src/intersection.rs` | line 163 | `pub fn attach_paths(model: &mut IntersectionModel, paths: LanePathMap)` — writes paths into lanes by id |
-| REQ-6 | Paths ready at startup | `src/intersection.rs` | lines 116–117 | `IntersectionModel::new()` calls `build_all_lane_paths()` then `attach_paths()` before returning |
-| REQ-6, SDS §13.3 | Vehicles move along polyline | `src/vehicle.rs` | line 84 | `pub fn advance_along_path(vehicle: &mut Vehicle, model: &IntersectionModel, dt: f32)` — segment iteration with remainder carry-over |
-| REQ-11 (A07 prep) | Sprite rotation follows path tangent | `src/vehicle.rs` | line 109 | `vehicle.heading_rad = seg_dy.atan2(seg_dx)` — updated on every segment transition |
-| SDS §13.3 | `SpawnSystem::update()` accepts model | `src/spawn.rs` | line 98 | Signature changed from `update(&mut self, dt: f32)` to `update(&mut self, model: &IntersectionModel, dt: f32)` |
-| REQ-6 | Path-following called each frame | `src/spawn.rs` | line 104 | `crate::vehicle::advance_along_path(vehicle, model, dt)` called after `integrate_physics` in update loop |
-| Integration | App passes model to spawn | `src/app.rs` | line 112 | `self.spawn.update(&self.intersection, FIXED_TIMESTEP_SECS)` |
-| AUD-28 | Path-following verified by test | `src/vehicle.rs` | line 225 | `advance_along_path_follows_waypoints_and_updates_heading` — asserts position advances along segment and `heading_rad` equals 0 for a horizontal path |
+- **`src/intersection.rs`** — Added `pub path: Vec<Vec2>` to `LaneInfo` (line 86); `pub type LanePathMap` (line 90); `pub fn attach_paths()` (line 163); `fn build_all_lane_paths()` (line 171) builds all 12 four-waypoint polylines with coordinates derived from `spawn_point_for()` and config constants; `IntersectionModel::new()` calls both at startup (lines 116–117). Two regression tests added: `all_lane_paths_start_at_spawn_point` and `approach_segment_is_axial_for_all_lanes`.
+- **`src/vehicle.rs`** — `pub fn advance_along_path()` (line 84): moves vehicle along lane polyline each frame, carries remainder across segment boundaries, updates `heading_rad` from segment tangent.
+- **`src/spawn.rs`** — `SpawnSystem::update` signature updated to `update(&mut self, model: &IntersectionModel, dt: f32)` (line 98); calls `advance_along_path` after `integrate_physics` each frame (line 104). Cross-track edit — see below.
+- **`src/app.rs`** — Call site updated to `self.spawn.update(&self.intersection, FIXED_TIMESTEP_SECS)` (line 112). Cross-track edit — see below.
 
 ## Technical Decisions
 
-- **dist_to_end from vehicle position, not segment start**: The loop measures distance to the next waypoint from the vehicle's current position rather than from the path segment's start point. This handles vehicles that are slightly off-path (e.g., freshly spawned with a spawn_point that doesn't exactly match path[0]) without requiring a snap step, while still producing the correct direction of travel.
-- **Segment direction for movement, not heading-to-waypoint**: Movement is always along `(seg_dx / seg_len, seg_dy / seg_len)` — the segment's unit vector — rather than the vector from the vehicle's position to the next waypoint. This keeps vehicles on the path lane geometrically even if the vehicle drifts slightly laterally.
-- **integrate_physics + advance_along_path called together**: B02 keeps both calls per spec. `integrate_physics` accumulates crossing metrics and velocity; `advance_along_path` overrides position and heading each frame to enforce path adherence. The two are additive in this ticket; B03/B04 will rebalance velocity authority.
-- **Hardcoded 4-point polylines**: Path geometry is defined as named constants in `build_all_lane_paths()` rather than computed algorithmically. The turn waypoints involve non-trivial diagonal steps that don't fall out cleanly from the existing lane-center-offset arithmetic; explicit values are more auditable against the SDS geometry table and easier to diff.
+- **`path[0]` via `spawn_point_for()`, not hardcoded**: Ensures spawn point and path start are bit-identical, guaranteed by sharing the same computation. Verified by `all_lane_paths_start_at_spawn_point` test.
+- **`path[1]` preserves lane offset to junction edge**: The approach arm segment (`path[0]→path[1]`) keeps constant x (N/S lanes) or constant y (E/W lanes). `path[1]` is computed as `Vec2::new(lane_x, jy_n)` for North, etc., where `lane_x = spawn_point_for(approach, route).x`. This eliminates lateral drift on the approach. Verified by `approach_segment_is_axial_for_all_lanes` test.
+- **Turn exit lanes derived from exit road's spawn coordinates**: `path[2]` for right/left turns uses the exit road's right-lane or left-lane y/x value, also derived from `spawn_point_for()` of the perpendicular approach. This keeps turn geometry consistent with Track A's lane layout.
+- **Straight-through path[2]/path[3] use same lane offset**: Unlike turns, straight vehicles keep the same x or y through the full junction to the off-screen point.
+- **`integrate_physics` + `advance_along_path` both called each frame**: B02 keeps both per spec. `integrate_physics` accumulates crossing metrics and velocity; `advance_along_path` overrides position and heading to enforce path adherence. B03/B04 will rebalance velocity authority.
+- **Hardcoded 4-point polylines, not algorithmic**: Turn waypoints inside the junction involve diagonal steps that don't fall out cleanly from lane-center-offset arithmetic alone; explicit values (derived from config helpers, not magic numbers) are more auditable.
 
 ## Cross-Track Changes
 
 | File | Owned by | Change | SDS §13.1 compliance |
 |------|----------|--------|----------------------|
-| `src/spawn.rs` | Track A | Updated `update()` signature to accept `&IntersectionModel`; added `advance_along_path` call each frame | Necessary integration point per SDS §13.3; SDS §13.2 updated in this PR |
-| `src/app.rs` | Track A | Updated `spawn.update()` call site to pass `&self.intersection` | Mechanical call site update required by `spawn.rs` signature change |
+| `src/spawn.rs` | Track A | `update()` signature changed from `(&mut self, dt: f32)` to `(&mut self, model: &IntersectionModel, dt: f32)`; `advance_along_path` called after `integrate_physics` each frame | Necessary integration point per SDS §13.3; SDS §13.2 updated in this PR |
+| `src/app.rs` | Track A | Call site updated to pass `&self.intersection` | Mechanical follow-on required by `spawn.rs` signature change |
+
+`src/render.rs` and `src/config.rs` — **not touched**.
+
+## Per-Lane Geometry Table
+
+Coordinates verified by reasoning from config constants:
+`INTERSECTION_CENTER_X=512, INTERSECTION_CENTER_Y=384, INTERSECTION_HALF_SIZE=60, LANE_WIDTH=40, APPROACH_MARGIN=48`.
+Junction edges: west x=452, east x=572, north y=324, south y=444.
+
+| Lane | Approach | Route | spawn / path[0] | path[1] (junction entry) | path[2] (junction exit) | path[3] (off-screen) | path[0]==spawn? | Axial approach? |
+|------|----------|-------|-----------------|--------------------------|-------------------------|----------------------|-----------------|-----------------|
+| 0 | North | Right | (552, 48) | (552, 324) | (452, 344) | (-64, 344) | ✅ | ✅ x=552 constant |
+| 1 | North | Straight | (512, 48) | (512, 324) | (512, 444) | (512, 832) | ✅ | ✅ x=512 constant |
+| 2 | North | Left | (472, 48) | (472, 324) | (572, 344) | (1088, 344) | ✅ | ✅ x=472 constant |
+| 3 | South | Right | (472, 720) | (472, 444) | (572, 424) | (1088, 424) | ✅ | ✅ x=472 constant |
+| 4 | South | Straight | (512, 720) | (512, 444) | (512, 324) | (512, -64) | ✅ | ✅ x=512 constant |
+| 5 | South | Left | (552, 720) | (552, 444) | (452, 424) | (-64, 424) | ✅ | ✅ x=552 constant |
+| 6 | East | Right | (976, 344) | (572, 344) | (552, 444) | (552, 832) | ✅ | ✅ y=344 constant |
+| 7 | East | Straight | (976, 384) | (572, 384) | (452, 384) | (-64, 384) | ✅ | ✅ y=384 constant |
+| 8 | East | Left | (976, 424) | (572, 424) | (552, 324) | (552, -64) | ✅ | ✅ y=424 constant |
+| 9 | West | Right | (48, 424) | (452, 424) | (472, 324) | (472, -64) | ✅ | ✅ y=424 constant |
+| 10 | West | Straight | (48, 384) | (452, 384) | (572, 384) | (1088, 384) | ✅ | ✅ y=384 constant |
+| 11 | West | Left | (48, 344) | (452, 344) | (472, 444) | (472, 832) | ✅ | ✅ y=344 constant |
+
+Axial approach = path[0] and path[1] share the same perpendicular-axis coordinate (no lateral drift on the approach arm).
 
 ## Verification Results
 
-### Automated Checks
+### Automated Checks (run 2026-06-16 on Linux, no SDL2 required for tests)
 
-- [x] `cargo test` — 36 tests passed (32 unit + 4 smoke)
-- [x] `cargo clippy -- -D warnings` — passes with no warnings
-- [x] `cargo fmt --check` — passes; all code formatted per rustfmt
-- [x] `cargo build` — succeeds
-- [x] `all_lane_paths_start_at_spawn_point` test — all 12 lanes verified
+```
+cargo test       — 37 tests: 33 unit + 4 smoke, 0 failed
+cargo clippy -- -D warnings  — clean, no warnings
+cargo fmt --check            — pass
+cargo build                  — succeeds
+```
 
-## AUD-28 Verification
+Test names in `src/intersection.rs` (intersection module, 7 tests):
+- `lane_registry_has_twelve_unique_lanes`
+- `each_approach_has_three_routes`
+- `lane_id_mapping_is_stable`
+- `zone_polygon_is_axis_aligned_box`
+- `spawn_points_sit_on_approach_edges`
+- `approach_segment_is_axial_for_all_lanes` ← **new in this PR (regression)**
+- `all_lane_paths_start_at_spawn_point` ← **new in this PR**
 
-| Lane | Approach | Route | path[0] matches spawn_point | Junction waypoint correct | Exit direction correct |
-|------|----------|-------|----------------------------|--------------------------|----------------------|
-| 0 | North | Right | ✅ (552.0, 48.0) | ✅ approach-consistent entry (472.0, 324.0) | ✅ West |
-| 1 | North | Straight | ✅ (512.0, 48.0) | ✅ approach-consistent entry (472.0, 324.0) | ✅ South |
-| 2 | North | Left | ✅ (472.0, 48.0) | ✅ approach-consistent entry (472.0, 324.0) | ✅ East |
-| 3 | South | Right | ✅ (472.0, 720.0) | ✅ approach-consistent entry (552.0, 444.0) | ✅ East |
-| 4 | South | Straight | ✅ (512.0, 720.0) | ✅ approach-consistent entry (552.0, 444.0) | ✅ North |
-| 5 | South | Left | ✅ (552.0, 720.0) | ✅ approach-consistent entry (552.0, 444.0) | ✅ West |
-| 6 | East | Right | ✅ (976.0, 344.0) | ✅ approach-consistent entry (572.0, 424.0) | ✅ South |
-| 7 | East | Straight | ✅ (976.0, 384.0) | ✅ approach-consistent entry (572.0, 424.0) | ✅ West |
-| 8 | East | Left | ✅ (976.0, 424.0) | ✅ approach-consistent entry (572.0, 424.0) | ✅ North |
-| 9 | West | Right | ✅ (48.0, 424.0) | ✅ approach-consistent entry (452.0, 344.0) | ✅ North |
-| 10 | West | Straight | ✅ (48.0, 384.0) | ✅ approach-consistent entry (452.0, 344.0) | ✅ East |
-| 11 | West | Left | ✅ (48.0, 344.0) | ✅ approach-consistent entry (452.0, 344.0) | ✅ South |
+A03/A04 tests confirmed passing (render, spawn, input modules):
+`road_asset_paths_are_under_assets_dir`, `layout_constants_fit_default_window`, `vehicle_dimensions_swap_for_ew_approaches`, `spawn_request_carries_lane_id`, `try_spawn_places_vehicle_on_lane_spawn_point`, `spawn_on_approach_rotates_routes`, `south/north/west/east_vehicle_moves_*`, `travel_heading_for_each_approach`, `arrow_*_spawns_*_approach`, `key_down_*`.
 
-### Manual Audit (against `docs/audit.md`)
+### Manual / Visual Audit (AUD-28)
 
-- [x] **REQ-6**: Pass — vehicles follow their assigned polyline route through the junction. Path geometry covers all 12 approach × turn combinations.
-- [x] **AUD-26**: Partial — crossing metrics (`distance_in_crossing`, `time_in_crossing`) now accumulate while vehicles trace their actual routes rather than straight-line headings, improving measurement accuracy. Full pass deferred to C06 (stats window).
+AUD-28 requires observing vehicles on each approach following fixed r/s/l routes with no lane changes. **This has not been visually confirmed in this environment — no local SDL2 display is available.** The geometry correctness is verified by:
 
-### Requirements Traceability
+- `approach_segment_is_axial_for_all_lanes`: asserts `path[0].x == path[1].x` (N/S) and `path[0].y == path[1].y` (E/W) for all 12 lanes — guarantees zero lateral drift on approach arms.
+- `all_lane_paths_start_at_spawn_point`: asserts `lane.path[0] == lane.spawn_point` for all 12 lanes — guarantees vehicle starts exactly on its polyline.
+- Coordinate derivation from `spawn_point_for()` and config constants (see table above) — geometric consistency with Track A's lane layout.
 
-- [x] **REQ-6** (route adherence): Each vehicle's `lane_id` maps to a `Vec<Vec2>` polyline stored in `LaneInfo.path`; `advance_along_path()` moves the vehicle along that polyline every frame. All 12 lanes are covered.
-- [ ] **REQ-7**: Minimum three velocities — deferred to B03.
-- [ ] **REQ-8**: Safe distance — deferred to B04.
+A full visual AUD-28 pass requires running the binary with an SDL2-capable display. The test suite provides mechanical correctness coverage; visual confirmation is deferred to the reviewer or CI environment with SDL2.
+
+## Requirements Traceability
+
+| Requirement | What it requires | File | Line | What was added |
+|-------------|-----------------|------|------|----------------|
+| REQ-2 | Three distinct routes (r/s/l) per approach | `src/intersection.rs` | 171 | `build_all_lane_paths()` — 12 polylines, one per approach×route |
+| REQ-6 | Vehicles follow designated route, no lane changes | `src/vehicle.rs` | 84 | `advance_along_path()` — locks vehicle to its lane polyline each frame |
+| REQ-5 (B01) | `velocity = distance/time` fields | `src/vehicle.rs` | 29–33 | `velocity`, `distance_in_crossing`, `time_in_crossing` fields; `integrate_physics` accumulates at lines 77–80 |
+| SDS §13.3 | `LanePathMap` type exported | `src/intersection.rs` | 90 | `pub type LanePathMap = HashMap<LaneId, Vec<Vec2>>` |
+| SDS §13.3 | `attach_paths()` exported | `src/intersection.rs` | 163 | `pub fn attach_paths(model: &mut IntersectionModel, paths: LanePathMap)` |
+| SDS §13.2 | `SpawnSystem::update` signature | `src/spawn.rs` | 98 | Updated to `(&mut self, model: &IntersectionModel, dt: f32)` |
+| REQ-11 prep (A07) | Heading from path tangent | `src/vehicle.rs` | 109 | `vehicle.heading_rad = seg_dy.atan2(seg_dx)` on each segment |
 
 ## Artifacts
 
-- **Test output**:
-  ```text
-  running 31 tests (unit) ... ok
+```
+cargo test output (2026-06-16):
+  running 33 tests (unit) ... ok
   running 4 tests (smoke) ... ok
-  test result: ok. 35 passed; 0 failed
-  ```
-- **Lint output**: `cargo clippy -- -D warnings` passes with no warnings.
-- **Format output**: `cargo fmt --check` passes.
-- **Build**: `cargo build` succeeds.
+  test result: ok. 37 passed; 0 failed
 
----
+cargo clippy -- -D warnings: Finished with no warnings
+cargo fmt --check: pass
+cargo build: Finished dev profile
+```
 
 ## Next Steps
 
-- **B03** — Velocity levels: Define `VelocityLevel` enum (Fast, Cruise, Yield ≥ 3 levels); set initial `commanded_velocity` on Vehicle; `integrate_physics` reads `commanded_velocity` rather than a fixed spawn speed.
-- **B04** — Safe distance: Implement `enforce_follow_distance()` and collision-avoidance for vehicles on the same lane path.
-- **C01** (unblocked by B02): Smart detection can now read `vehicle.position` against the zone polygon to transition Approaching → Managed on entry; path-following makes zone-crossing deterministic.
+- **B03** — Velocity levels: `VelocityLevel` enum (Fast/Cruise/Yield ≥ 3 levels); `integrate_physics` reads `commanded_velocity`.
+- **B04** — Safe distance: `enforce_follow_distance()`; collision-avoidance for vehicles on the same lane.
+- **A07** (unblocked by B02): Turn animation using `heading_rad` tangent now updated by `advance_along_path`.
+- **C01** (unblocked by B02): Smart detection reads `vehicle.position` against `zone_polygon`; path-following makes zone entry deterministic.
+- **Visual AUD-28**: Reviewer should run binary on SDL2-capable host and observe all 4 approaches × 3 routes for no lane crossing.

@@ -171,119 +171,142 @@ pub fn attach_paths(model: &mut IntersectionModel, paths: LanePathMap) {
 fn build_all_lane_paths() -> LanePathMap {
     let mut map = HashMap::with_capacity(12);
 
-    // North approach (travels south)
+    // Junction box edges (derived from config constants)
+    let jx_w = INTERSECTION_CENTER_X - INTERSECTION_HALF_SIZE; // 452.0 — west edge
+    let jx_e = INTERSECTION_CENTER_X + INTERSECTION_HALF_SIZE; // 572.0 — east edge
+    let jy_n = INTERSECTION_CENTER_Y - INTERSECTION_HALF_SIZE; // 324.0 — north edge
+    let jy_s = INTERSECTION_CENTER_Y + INTERSECTION_HALF_SIZE; // 444.0 — south edge
+
+    // Per-lane center coordinates (derived from spawn_point_for so they stay
+    // consistent with lane_center_offset and Track A's config constants).
+    // N/S lanes: each lane keeps constant x through its approach arm.
+    // E/W lanes: each lane keeps constant y through its approach arm.
+    let n_r_x = spawn_point_for(Cardinal::North, Route::Right).x; // 552.0
+    let n_s_x = spawn_point_for(Cardinal::North, Route::Straight).x; // 512.0
+    let n_l_x = spawn_point_for(Cardinal::North, Route::Left).x; // 472.0
+    let s_r_x = spawn_point_for(Cardinal::South, Route::Right).x; // 472.0
+    let s_s_x = spawn_point_for(Cardinal::South, Route::Straight).x; // 512.0
+    let s_l_x = spawn_point_for(Cardinal::South, Route::Left).x; // 552.0
+    let e_r_y = spawn_point_for(Cardinal::East, Route::Right).y; // 344.0
+    let e_s_y = spawn_point_for(Cardinal::East, Route::Straight).y; // 384.0
+    let e_l_y = spawn_point_for(Cardinal::East, Route::Left).y; // 424.0
+    let w_r_y = spawn_point_for(Cardinal::West, Route::Right).y; // 424.0
+    let w_s_y = spawn_point_for(Cardinal::West, Route::Straight).y; // 384.0
+    let w_l_y = spawn_point_for(Cardinal::West, Route::Left).y; // 344.0
+
+    // North approach (travels south; x is constant from spawn to junction north edge)
     map.insert(
         lane_id(Cardinal::North, Route::Right),
         vec![
-            spawn_point_for(Cardinal::North, Route::Right),
-            Vec2::new(472.0, 324.0),
-            Vec2::new(452.0, 344.0),
-            Vec2::new(-64.0, 344.0),
+            spawn_point_for(Cardinal::North, Route::Right), // (552, 48)
+            Vec2::new(n_r_x, jy_n),                         // (552, 324) — junction north edge
+            Vec2::new(jx_w, e_r_y), // (452, 344) — west edge, right westbound lane
+            Vec2::new(-64.0, e_r_y), // off-screen west
         ],
     );
     map.insert(
         lane_id(Cardinal::North, Route::Straight),
         vec![
-            spawn_point_for(Cardinal::North, Route::Straight),
-            Vec2::new(472.0, 324.0),
-            Vec2::new(472.0, 444.0),
-            Vec2::new(472.0, 832.0),
+            spawn_point_for(Cardinal::North, Route::Straight), // (512, 48)
+            Vec2::new(n_s_x, jy_n),                            // (512, 324) — junction north edge
+            Vec2::new(n_s_x, jy_s),                            // (512, 444) — junction south edge
+            Vec2::new(n_s_x, 832.0),                           // (512, 832) — off-screen south
         ],
     );
     map.insert(
         lane_id(Cardinal::North, Route::Left),
         vec![
-            spawn_point_for(Cardinal::North, Route::Left),
-            Vec2::new(472.0, 324.0),
-            Vec2::new(572.0, 344.0),
-            Vec2::new(1088.0, 344.0),
+            spawn_point_for(Cardinal::North, Route::Left), // (472, 48)
+            Vec2::new(n_l_x, jy_n),                        // (472, 324) — junction north edge
+            Vec2::new(jx_e, w_l_y), // (572, 344) — east edge, left eastbound lane
+            Vec2::new(1088.0, w_l_y), // off-screen east
         ],
     );
 
-    // South approach (travels north)
+    // South approach (travels north; x is constant from spawn to junction south edge)
     map.insert(
         lane_id(Cardinal::South, Route::Right),
         vec![
-            spawn_point_for(Cardinal::South, Route::Right),
-            Vec2::new(552.0, 444.0),
-            Vec2::new(572.0, 424.0),
-            Vec2::new(1088.0, 424.0),
+            spawn_point_for(Cardinal::South, Route::Right), // (472, 720)
+            Vec2::new(s_r_x, jy_s),                         // (472, 444) — junction south edge
+            Vec2::new(jx_e, w_r_y), // (572, 424) — east edge, right eastbound lane
+            Vec2::new(1088.0, w_r_y), // off-screen east
         ],
     );
     map.insert(
         lane_id(Cardinal::South, Route::Straight),
         vec![
-            spawn_point_for(Cardinal::South, Route::Straight),
-            Vec2::new(552.0, 444.0),
-            Vec2::new(552.0, 324.0),
-            Vec2::new(552.0, -64.0),
+            spawn_point_for(Cardinal::South, Route::Straight), // (512, 720)
+            Vec2::new(s_s_x, jy_s),                            // (512, 444) — junction south edge
+            Vec2::new(s_s_x, jy_n),                            // (512, 324) — junction north edge
+            Vec2::new(s_s_x, -64.0),                           // (512, -64) — off-screen north
         ],
     );
     map.insert(
         lane_id(Cardinal::South, Route::Left),
         vec![
-            spawn_point_for(Cardinal::South, Route::Left),
-            Vec2::new(552.0, 444.0),
-            Vec2::new(452.0, 424.0),
-            Vec2::new(-64.0, 424.0),
+            spawn_point_for(Cardinal::South, Route::Left), // (552, 720)
+            Vec2::new(s_l_x, jy_s),                        // (552, 444) — junction south edge
+            Vec2::new(jx_w, e_l_y), // (452, 424) — west edge, left westbound lane
+            Vec2::new(-64.0, e_l_y), // off-screen west
         ],
     );
 
-    // East approach (travels west)
+    // East approach (travels west; y is constant from spawn to junction east edge)
     map.insert(
         lane_id(Cardinal::East, Route::Right),
         vec![
-            spawn_point_for(Cardinal::East, Route::Right),
-            Vec2::new(572.0, 424.0),
-            Vec2::new(552.0, 444.0),
-            Vec2::new(552.0, 832.0),
+            spawn_point_for(Cardinal::East, Route::Right), // (976, 344)
+            Vec2::new(jx_e, e_r_y),                        // (572, 344) — junction east edge
+            Vec2::new(n_r_x, jy_s), // (552, 444) — south edge, right southbound lane
+            Vec2::new(n_r_x, 832.0), // off-screen south
         ],
     );
     map.insert(
         lane_id(Cardinal::East, Route::Straight),
         vec![
-            spawn_point_for(Cardinal::East, Route::Straight),
-            Vec2::new(572.0, 424.0),
-            Vec2::new(452.0, 424.0),
-            Vec2::new(-64.0, 424.0),
+            spawn_point_for(Cardinal::East, Route::Straight), // (976, 384)
+            Vec2::new(jx_e, e_s_y),                           // (572, 384) — junction east edge
+            Vec2::new(jx_w, e_s_y),                           // (452, 384) — junction west edge
+            Vec2::new(-64.0, e_s_y),                          // (-64, 384) — off-screen west
         ],
     );
     map.insert(
         lane_id(Cardinal::East, Route::Left),
         vec![
-            spawn_point_for(Cardinal::East, Route::Left),
-            Vec2::new(572.0, 424.0),
-            Vec2::new(552.0, 324.0),
-            Vec2::new(552.0, -64.0),
+            spawn_point_for(Cardinal::East, Route::Left), // (976, 424)
+            Vec2::new(jx_e, e_l_y),                       // (572, 424) — junction east edge
+            Vec2::new(s_l_x, jy_n), // (552, 324) — north edge, left northbound lane
+            Vec2::new(s_l_x, -64.0), // off-screen north
         ],
     );
 
-    // West approach (travels east)
+    // West approach (travels east; y is constant from spawn to junction west edge)
     map.insert(
         lane_id(Cardinal::West, Route::Right),
         vec![
-            spawn_point_for(Cardinal::West, Route::Right),
-            Vec2::new(452.0, 344.0),
-            Vec2::new(472.0, 324.0),
-            Vec2::new(472.0, -64.0),
+            spawn_point_for(Cardinal::West, Route::Right), // (48, 424)
+            Vec2::new(jx_w, w_r_y),                        // (452, 424) — junction west edge
+            Vec2::new(s_r_x, jy_n), // (472, 324) — north edge, right northbound lane
+            Vec2::new(s_r_x, -64.0), // off-screen north
         ],
     );
     map.insert(
         lane_id(Cardinal::West, Route::Straight),
         vec![
-            spawn_point_for(Cardinal::West, Route::Straight),
-            Vec2::new(452.0, 344.0),
-            Vec2::new(572.0, 344.0),
-            Vec2::new(1088.0, 344.0),
+            spawn_point_for(Cardinal::West, Route::Straight), // (48, 384)
+            Vec2::new(jx_w, w_s_y),                           // (452, 384) — junction west edge
+            Vec2::new(jx_e, w_s_y),                           // (572, 384) — junction east edge
+            Vec2::new(1088.0, w_s_y),                         // (1088, 384) — off-screen east
         ],
     );
     map.insert(
         lane_id(Cardinal::West, Route::Left),
         vec![
-            spawn_point_for(Cardinal::West, Route::Left),
-            Vec2::new(452.0, 344.0),
-            Vec2::new(472.0, 444.0),
-            Vec2::new(472.0, 832.0),
+            spawn_point_for(Cardinal::West, Route::Left), // (48, 344)
+            Vec2::new(jx_w, w_l_y),                       // (452, 344) — junction west edge
+            Vec2::new(n_l_x, jy_s), // (472, 444) — south edge, left southbound lane
+            Vec2::new(n_l_x, 832.0), // off-screen south
         ],
     );
 
@@ -397,6 +420,31 @@ mod tests {
             .lane(lane_id(Cardinal::North, Route::Straight))
             .unwrap();
         assert!(north.spawn_point.y < INTERSECTION_CENTER_Y);
+    }
+
+    #[test]
+    fn approach_segment_is_axial_for_all_lanes() {
+        // Verifies that the approach arm (path[0]→path[1]) has no perpendicular drift.
+        // N/S lanes travel vertically: x must be constant. E/W lanes travel horizontally: y must be constant.
+        // This is the regression test that catches the original bug (path[1] used the left-lane
+        // coordinate for all three routes) and its incomplete fix (only path[0] was corrected).
+        let model = IntersectionModel::new();
+        for lane in &model.lanes {
+            let p0 = lane.path[0];
+            let p1 = lane.path[1];
+            match lane.approach {
+                Cardinal::North | Cardinal::South => assert_eq!(
+                    p0.x, p1.x,
+                    "N/S approach segment has x-drift for {:?} {:?}: path[0].x={} path[1].x={}",
+                    lane.approach, lane.route, p0.x, p1.x
+                ),
+                Cardinal::East | Cardinal::West => assert_eq!(
+                    p0.y, p1.y,
+                    "E/W approach segment has y-drift for {:?} {:?}: path[0].y={} path[1].y={}",
+                    lane.approach, lane.route, p0.y, p1.y
+                ),
+            }
+        }
     }
 
     #[test]
