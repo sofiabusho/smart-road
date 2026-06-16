@@ -175,7 +175,7 @@ fn build_all_lane_paths() -> LanePathMap {
     map.insert(
         lane_id(Cardinal::North, Route::Right),
         vec![
-            Vec2::new(472.0, 48.0),
+            spawn_point_for(Cardinal::North, Route::Right),
             Vec2::new(472.0, 324.0),
             Vec2::new(452.0, 344.0),
             Vec2::new(-64.0, 344.0),
@@ -184,7 +184,7 @@ fn build_all_lane_paths() -> LanePathMap {
     map.insert(
         lane_id(Cardinal::North, Route::Straight),
         vec![
-            Vec2::new(472.0, 48.0),
+            spawn_point_for(Cardinal::North, Route::Straight),
             Vec2::new(472.0, 324.0),
             Vec2::new(472.0, 444.0),
             Vec2::new(472.0, 832.0),
@@ -193,7 +193,7 @@ fn build_all_lane_paths() -> LanePathMap {
     map.insert(
         lane_id(Cardinal::North, Route::Left),
         vec![
-            Vec2::new(472.0, 48.0),
+            spawn_point_for(Cardinal::North, Route::Left),
             Vec2::new(472.0, 324.0),
             Vec2::new(572.0, 344.0),
             Vec2::new(1088.0, 344.0),
@@ -204,7 +204,7 @@ fn build_all_lane_paths() -> LanePathMap {
     map.insert(
         lane_id(Cardinal::South, Route::Right),
         vec![
-            Vec2::new(552.0, 720.0),
+            spawn_point_for(Cardinal::South, Route::Right),
             Vec2::new(552.0, 444.0),
             Vec2::new(572.0, 424.0),
             Vec2::new(1088.0, 424.0),
@@ -213,7 +213,7 @@ fn build_all_lane_paths() -> LanePathMap {
     map.insert(
         lane_id(Cardinal::South, Route::Straight),
         vec![
-            Vec2::new(552.0, 720.0),
+            spawn_point_for(Cardinal::South, Route::Straight),
             Vec2::new(552.0, 444.0),
             Vec2::new(552.0, 324.0),
             Vec2::new(552.0, -64.0),
@@ -222,7 +222,7 @@ fn build_all_lane_paths() -> LanePathMap {
     map.insert(
         lane_id(Cardinal::South, Route::Left),
         vec![
-            Vec2::new(552.0, 720.0),
+            spawn_point_for(Cardinal::South, Route::Left),
             Vec2::new(552.0, 444.0),
             Vec2::new(452.0, 424.0),
             Vec2::new(-64.0, 424.0),
@@ -233,7 +233,7 @@ fn build_all_lane_paths() -> LanePathMap {
     map.insert(
         lane_id(Cardinal::East, Route::Right),
         vec![
-            Vec2::new(976.0, 424.0),
+            spawn_point_for(Cardinal::East, Route::Right),
             Vec2::new(572.0, 424.0),
             Vec2::new(552.0, 444.0),
             Vec2::new(552.0, 832.0),
@@ -242,7 +242,7 @@ fn build_all_lane_paths() -> LanePathMap {
     map.insert(
         lane_id(Cardinal::East, Route::Straight),
         vec![
-            Vec2::new(976.0, 424.0),
+            spawn_point_for(Cardinal::East, Route::Straight),
             Vec2::new(572.0, 424.0),
             Vec2::new(452.0, 424.0),
             Vec2::new(-64.0, 424.0),
@@ -251,7 +251,7 @@ fn build_all_lane_paths() -> LanePathMap {
     map.insert(
         lane_id(Cardinal::East, Route::Left),
         vec![
-            Vec2::new(976.0, 424.0),
+            spawn_point_for(Cardinal::East, Route::Left),
             Vec2::new(572.0, 424.0),
             Vec2::new(552.0, 324.0),
             Vec2::new(552.0, -64.0),
@@ -262,7 +262,7 @@ fn build_all_lane_paths() -> LanePathMap {
     map.insert(
         lane_id(Cardinal::West, Route::Right),
         vec![
-            Vec2::new(48.0, 344.0),
+            spawn_point_for(Cardinal::West, Route::Right),
             Vec2::new(452.0, 344.0),
             Vec2::new(472.0, 324.0),
             Vec2::new(472.0, -64.0),
@@ -271,7 +271,7 @@ fn build_all_lane_paths() -> LanePathMap {
     map.insert(
         lane_id(Cardinal::West, Route::Straight),
         vec![
-            Vec2::new(48.0, 344.0),
+            spawn_point_for(Cardinal::West, Route::Straight),
             Vec2::new(452.0, 344.0),
             Vec2::new(572.0, 344.0),
             Vec2::new(1088.0, 344.0),
@@ -280,7 +280,7 @@ fn build_all_lane_paths() -> LanePathMap {
     map.insert(
         lane_id(Cardinal::West, Route::Left),
         vec![
-            Vec2::new(48.0, 344.0),
+            spawn_point_for(Cardinal::West, Route::Left),
             Vec2::new(452.0, 344.0),
             Vec2::new(472.0, 444.0),
             Vec2::new(472.0, 832.0),
@@ -397,6 +397,18 @@ mod tests {
             .lane(lane_id(Cardinal::North, Route::Straight))
             .unwrap();
         assert!(north.spawn_point.y < INTERSECTION_CENTER_Y);
+    }
+
+    #[test]
+    fn all_lane_paths_start_at_spawn_point() {
+        let model = IntersectionModel::new();
+        for lane in &model.lanes {
+            assert_eq!(
+                lane.path[0], lane.spawn_point,
+                "path[0] mismatch for {:?} {:?}",
+                lane.approach, lane.route
+            );
+        }
     }
 
     #[test]

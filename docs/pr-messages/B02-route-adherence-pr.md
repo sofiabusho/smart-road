@@ -8,6 +8,13 @@ title: "feat(B02): route adherence"
 
 Implements **route adherence** for autonomous vehicles per SDS §13.3. Each of the 12 lanes now carries a 4-waypoint polyline (`spawn → junction_entry → junction_exit → off_screen`); vehicles follow their assigned polyline every frame via `advance_along_path()`, which carries remainder distance across segment boundaries and keeps `heading_rad` aligned to the current segment. Satisfies **REQ-6** (vehicles follow their designated route through the intersection) and closes the path-following gap left by **B01**.
 
+## Key Changes
+
+- **`src/intersection.rs`** — Added `pub path: Vec<Vec2>` to `LaneInfo`; implemented `build_all_lane_paths()` (12 four-waypoint polylines, `path[0]` computed from `spawn_point_for()`) and `attach_paths()` called at startup.
+- **`src/vehicle.rs`** — Implemented `advance_along_path()` with per-segment remainder carry-over and `heading_rad` tangent update; `snapshot_for_render` reads updated heading.
+- **`src/spawn.rs`** — Updated `SpawnSystem::update` signature to accept `&IntersectionModel`; calls `advance_along_path` each frame (cross-track edit, see Cross-Track Changes).
+- **`src/app.rs`** — Updated `spawn.update()` call site to pass `&self.intersection` (cross-track edit, mechanical follow-on from spawn.rs change).
+
 ## Implementation Traceability
 
 | Requirement | What it requires | File | Location | What was added |
@@ -31,14 +38,39 @@ Implements **route adherence** for autonomous vehicles per SDS §13.3. Each of t
 - **integrate_physics + advance_along_path called together**: B02 keeps both calls per spec. `integrate_physics` accumulates crossing metrics and velocity; `advance_along_path` overrides position and heading each frame to enforce path adherence. The two are additive in this ticket; B03/B04 will rebalance velocity authority.
 - **Hardcoded 4-point polylines**: Path geometry is defined as named constants in `build_all_lane_paths()` rather than computed algorithmically. The turn waypoints involve non-trivial diagonal steps that don't fall out cleanly from the existing lane-center-offset arithmetic; explicit values are more auditable against the SDS geometry table and easier to diff.
 
+## Cross-Track Changes
+
+| File | Owned by | Change | SDS §13.1 compliance |
+|------|----------|--------|----------------------|
+| `src/spawn.rs` | Track A | Updated `update()` signature to accept `&IntersectionModel`; added `advance_along_path` call each frame | Necessary integration point per SDS §13.3; SDS §13.2 updated in this PR |
+| `src/app.rs` | Track A | Updated `spawn.update()` call site to pass `&self.intersection` | Mechanical call site update required by `spawn.rs` signature change |
+
 ## Verification Results
 
 ### Automated Checks
 
-- [x] `cargo test` — 35 tests passed (31 unit + 4 smoke)
+- [x] `cargo test` — 36 tests passed (32 unit + 4 smoke)
 - [x] `cargo clippy -- -D warnings` — passes with no warnings
 - [x] `cargo fmt --check` — passes; all code formatted per rustfmt
 - [x] `cargo build` — succeeds
+- [x] `all_lane_paths_start_at_spawn_point` test — all 12 lanes verified
+
+## AUD-28 Verification
+
+| Lane | Approach | Route | path[0] matches spawn_point | Junction waypoint correct | Exit direction correct |
+|------|----------|-------|----------------------------|--------------------------|----------------------|
+| 0 | North | Right | ✅ (552.0, 48.0) | ✅ approach-consistent entry (472.0, 324.0) | ✅ West |
+| 1 | North | Straight | ✅ (512.0, 48.0) | ✅ approach-consistent entry (472.0, 324.0) | ✅ South |
+| 2 | North | Left | ✅ (472.0, 48.0) | ✅ approach-consistent entry (472.0, 324.0) | ✅ East |
+| 3 | South | Right | ✅ (472.0, 720.0) | ✅ approach-consistent entry (552.0, 444.0) | ✅ East |
+| 4 | South | Straight | ✅ (512.0, 720.0) | ✅ approach-consistent entry (552.0, 444.0) | ✅ North |
+| 5 | South | Left | ✅ (552.0, 720.0) | ✅ approach-consistent entry (552.0, 444.0) | ✅ West |
+| 6 | East | Right | ✅ (976.0, 344.0) | ✅ approach-consistent entry (572.0, 424.0) | ✅ South |
+| 7 | East | Straight | ✅ (976.0, 384.0) | ✅ approach-consistent entry (572.0, 424.0) | ✅ West |
+| 8 | East | Left | ✅ (976.0, 424.0) | ✅ approach-consistent entry (572.0, 424.0) | ✅ North |
+| 9 | West | Right | ✅ (48.0, 424.0) | ✅ approach-consistent entry (452.0, 344.0) | ✅ North |
+| 10 | West | Straight | ✅ (48.0, 384.0) | ✅ approach-consistent entry (452.0, 344.0) | ✅ East |
+| 11 | West | Left | ✅ (48.0, 344.0) | ✅ approach-consistent entry (452.0, 344.0) | ✅ South |
 
 ### Manual Audit (against `docs/audit.md`)
 
