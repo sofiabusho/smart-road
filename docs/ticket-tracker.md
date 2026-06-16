@@ -8,7 +8,7 @@
 > - **A/B/C**: Parallel developer tracks (see §2)
 > - **🔗**: Cross-track dependency — external ticket must be ✅ first
 
-Last refreshed: 2026-06-14 (A01, A02, A03, A04 ✅)
+Last refreshed: 2026-06-16 (A01, A02, A03, A04, B01, B02 ✅)
 
 ---
 
@@ -106,7 +106,7 @@ Execution order:
 | ID | Status | Ticket | Size | Deps | REQ / AUD | Verification gate | Track |
 |----|--------|--------|------|------|-----------|-------------------|-------|
 | B01 | ✅ | **Vehicle physics**: position along path, v=d/t fields | M | A04 🔗 | REQ-5 | Unit tests; AUD-26 (with C06) | B |
-| B02 | ⬜ | **Route adherence**: lane-locked polylines on `IntersectionModel` | M | B01, A03 🔗 | REQ-2, REQ-6 · AUD-28 | AUD-28 | B |
+| B02 | ✅ | **Route adherence**: lane-locked polylines on `IntersectionModel` | M | B01, A03 🔗 | REQ-2, REQ-6 · AUD-28 | AUD-28 | B |
 | B03 | ⬜ | **Velocity levels**: ≥3 distinct speeds | S | B01 | REQ-7 · AUD-31 | AUD-31 | B |
 | B04 | ⬜ | **Safe distance**: follow logic, positive constant | M | B01 | REQ-8 · AUD-29, AUD-30 | AUD-29, AUD-30 | B |
 | B05 | ⬜ | **Acceleration / deceleration** *(bonus)* | M | B01 | REQ-B3 · AUD-B3 | AUD-B3 | B |

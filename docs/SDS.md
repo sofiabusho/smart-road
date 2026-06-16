@@ -385,7 +385,7 @@ pub struct SpawnSystem { /* vehicles, route_counters, cooldown */ }
 impl SpawnSystem {
     pub fn try_spawn(&mut self, req: SpawnRequest, model: &IntersectionModel) -> Option<VehicleId>;
     pub fn spawn_on_approach(&mut self, approach: Cardinal, model: &IntersectionModel) -> Option<VehicleId>;
-    pub fn update(&mut self, dt: f32);  // A04 stub straight-line integrator; B01 replaces
+    pub fn update(&mut self, model: &IntersectionModel, dt: f32);  // B02: signature updated to accept model for advance_along_path
     pub fn vehicles(&self) -> &[Vehicle];
 }
 

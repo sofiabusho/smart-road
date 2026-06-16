@@ -94,13 +94,14 @@ impl SpawnSystem {
         self.try_spawn(SpawnRequest::new(approach, route), model)
     }
 
-    /// Advance stub movement and remove vehicles that left the canvas (B01 replaces physics).
-    pub fn update(&mut self, dt: f32) {
+    /// Advance movement along lane paths and remove vehicles that left the canvas.
+    pub fn update(&mut self, model: &IntersectionModel, dt: f32) {
         for vehicle in &mut self.vehicles {
             if vehicle.state == VehicleState::Done {
                 continue;
             }
             crate::vehicle::integrate_physics(vehicle, dt);
+            crate::vehicle::advance_along_path(vehicle, model, dt);
             if is_off_screen(vehicle.position) {
                 vehicle.state = VehicleState::Done;
             }
@@ -180,7 +181,7 @@ mod tests {
         let mut spawn = SpawnSystem::new();
         spawn.try_spawn(SpawnRequest::new(Cardinal::South, Route::Straight), &model);
         let y0 = spawn.vehicles()[0].position.y;
-        spawn.update(1.0);
+        spawn.update(&IntersectionModel::new(), 1.0);
         assert!(spawn.vehicles()[0].position.y < y0);
     }
 
@@ -190,7 +191,7 @@ mod tests {
         let mut spawn = SpawnSystem::new();
         spawn.try_spawn(SpawnRequest::new(Cardinal::North, Route::Straight), &model);
         let y0 = spawn.vehicles()[0].position.y;
-        spawn.update(1.0);
+        spawn.update(&IntersectionModel::new(), 1.0);
         assert!(spawn.vehicles()[0].position.y > y0);
     }
 
@@ -200,7 +201,7 @@ mod tests {
         let mut spawn = SpawnSystem::new();
         spawn.try_spawn(SpawnRequest::new(Cardinal::West, Route::Straight), &model);
         let x0 = spawn.vehicles()[0].position.x;
-        spawn.update(1.0);
+        spawn.update(&IntersectionModel::new(), 1.0);
         assert!(spawn.vehicles()[0].position.x > x0);
     }
 
@@ -210,7 +211,7 @@ mod tests {
         let mut spawn = SpawnSystem::new();
         spawn.try_spawn(SpawnRequest::new(Cardinal::East, Route::Straight), &model);
         let x0 = spawn.vehicles()[0].position.x;
-        spawn.update(1.0);
+        spawn.update(&IntersectionModel::new(), 1.0);
         assert!(spawn.vehicles()[0].position.x < x0);
     }
 

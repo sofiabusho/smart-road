@@ -1,6 +1,8 @@
 //! Autonomous vehicle state and physics (B01+).
 
-use crate::intersection::{LaneId, LaneInfo, Route, Vec2, VehicleRenderSnapshot};
+use crate::intersection::{
+    IntersectionModel, LaneId, LaneInfo, Route, Vec2, VehicleRenderSnapshot,
+};
 
 /// Unique vehicle identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -78,9 +80,55 @@ pub fn integrate_physics(vehicle: &mut Vehicle, dt: f32) {
     }
 }
 
+/// Move vehicle along its lane path polyline for this frame.
+pub fn advance_along_path(vehicle: &mut Vehicle, model: &IntersectionModel, dt: f32) {
+    let path = match model.lane(vehicle.lane_id) {
+        Some(lane) if !lane.path.is_empty() => &lane.path,
+        _ => return,
+    };
+
+    if vehicle.path_index >= path.len() - 1 {
+        return;
+    }
+
+    let mut remaining = vehicle.velocity * dt;
+
+    while remaining > 0.0 && vehicle.path_index < path.len() - 1 {
+        let from = path[vehicle.path_index];
+        let to = path[vehicle.path_index + 1];
+
+        let seg_dx = to.x - from.x;
+        let seg_dy = to.y - from.y;
+        let seg_len = (seg_dx * seg_dx + seg_dy * seg_dy).sqrt();
+
+        if seg_len == 0.0 {
+            vehicle.path_index += 1;
+            continue;
+        }
+
+        vehicle.heading_rad = seg_dy.atan2(seg_dx);
+
+        let to_end_dx = to.x - vehicle.position.x;
+        let to_end_dy = to.y - vehicle.position.y;
+        let dist_to_end = (to_end_dx * to_end_dx + to_end_dy * to_end_dy).sqrt();
+
+        if remaining <= dist_to_end {
+            vehicle.position.x += (seg_dx / seg_len) * remaining;
+            vehicle.position.y += (seg_dy / seg_len) * remaining;
+            remaining = 0.0;
+        } else {
+            remaining -= dist_to_end;
+            vehicle.position = to;
+            vehicle.path_index += 1;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::intersection::{attach_paths, IntersectionModel};
+    use std::collections::HashMap;
 
     #[test]
     fn integrate_physics_does_not_accumulate_crossing_metrics_when_approaching() {
@@ -171,5 +219,36 @@ mod tests {
             vehicle.time_in_crossing, 0.1,
             "time should accumulate by dt when Exiting"
         );
+    }
+
+    #[test]
+    fn advance_along_path_follows_waypoints_and_updates_heading() {
+        let mut model = IntersectionModel::new();
+        let lane_id = model.lanes[0].id;
+
+        let paths = HashMap::from([(lane_id, vec![Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0)])]);
+        attach_paths(&mut model, paths);
+
+        let mut vehicle = Vehicle {
+            id: VehicleId(1),
+            lane_id,
+            route: model.lanes[0].route,
+            approach: model.lanes[0].approach,
+            position: Vec2::new(0.0, 0.0),
+            heading_rad: 0.0,
+            velocity: 50.0,
+            commanded_velocity: 50.0,
+            state: VehicleState::Approaching,
+            path_index: 0,
+            distance_in_crossing: 0.0,
+            time_in_crossing: 0.0,
+        };
+
+        advance_along_path(&mut vehicle, &model, 1.0);
+
+        assert!(vehicle.position.x > 0.0);
+        assert!(vehicle.position.x <= 100.0);
+        assert_eq!(vehicle.position.y, 0.0);
+        assert_eq!(vehicle.heading_rad, 0.0);
     }
 }

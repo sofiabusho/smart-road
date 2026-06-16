@@ -109,7 +109,7 @@ impl App {
             }
         }
 
-        self.spawn.update(FIXED_TIMESTEP_SECS);
+        self.spawn.update(&self.intersection, FIXED_TIMESTEP_SECS);
 
         let _ = (&mut self.smart, &mut self.stats, self.spawn.vehicles());
     }
