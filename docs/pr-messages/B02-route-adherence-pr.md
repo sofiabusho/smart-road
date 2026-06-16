@@ -8,14 +8,15 @@ title: "feat(B02): route adherence"
 
 Implements **route adherence** for all 12 lanes per SDS §13.3. Each `LaneInfo` now carries a 4-waypoint polyline (`spawn → junction_entry → junction_exit → off_screen`); `advance_along_path()` moves the vehicle along that polyline each frame with remainder carry-over across segment boundaries and `heading_rad` tracking the current segment tangent. Satisfies **REQ-2** (three distinct routes per approach) and **REQ-6** (vehicles follow their designated route with no lane changes).
 
-Two geometry bugs were found and fixed during review (see Per-Lane Geometry Table):
+Three geometry bugs were found and fixed during review (see Per-Lane Geometry Table):
 
 1. **path[0] mismatch** — all three routes per approach shared the left-lane hardcoded coordinate as `path[0]`; fixed by calling `spawn_point_for(approach, route)` for every lane.
 2. **Approach-segment drift** — `path[1]` also used the left-lane coordinate, so right/straight vehicles drifted laterally on the approach arm; fixed by deriving `path[1]` from the same per-lane x/y offset and the junction-edge constant.
+3. **East/West turn directions reversed** — East Right/Left and West Right/Left used the wrong junction edge (north vs south) for path[2]/path[3], causing turns to exit the wrong side; fixed by swapping `jy_n`↔`jy_s` and the off-screen y sign for all four lanes.
 
 ## Key Changes
 
-- **`src/intersection.rs`** — Added `pub path: Vec<Vec2>` to `LaneInfo` (line 86); `pub type LanePathMap` (line 90); `pub fn attach_paths()` (line 163); `fn build_all_lane_paths()` (line 171) builds all 12 four-waypoint polylines with coordinates derived from `spawn_point_for()` and config constants; `IntersectionModel::new()` calls both at startup (lines 116–117). Two regression tests added: `all_lane_paths_start_at_spawn_point` and `approach_segment_is_axial_for_all_lanes`.
+- **`src/intersection.rs`** — Added `pub path: Vec<Vec2>` to `LaneInfo` (line 86); `pub type LanePathMap` (line 90); `pub fn attach_paths()` (line 163); `fn build_all_lane_paths()` (line 171) builds all 12 four-waypoint polylines with coordinates derived from `spawn_point_for()` and config constants; `IntersectionModel::new()` calls both at startup (lines 116–117). Three regression tests added: `all_lane_paths_start_at_spawn_point`, `approach_segment_is_axial_for_all_lanes`, and `lane_exit_direction_matches_route`.
 - **`src/vehicle.rs`** — `pub fn advance_along_path()` (line 84): moves vehicle along lane polyline each frame, carries remainder across segment boundaries, updates `heading_rad` from segment tangent.
 - **`src/spawn.rs`** — `SpawnSystem::update` signature updated to `update(&mut self, model: &IntersectionModel, dt: f32)` (line 98); calls `advance_along_path` after `integrate_physics` each frame (line 104). Cross-track edit — see below.
 - **`src/app.rs`** — Call site updated to `self.spawn.update(&self.intersection, FIXED_TIMESTEP_SECS)` (line 112). Cross-track edit — see below.
@@ -44,35 +45,35 @@ Coordinates verified by reasoning from config constants:
 `INTERSECTION_CENTER_X=512, INTERSECTION_CENTER_Y=384, INTERSECTION_HALF_SIZE=60, LANE_WIDTH=40, APPROACH_MARGIN=48`.
 Junction edges: west x=452, east x=572, north y=324, south y=444.
 
-| Lane | Approach | Route | spawn / path[0] | path[1] (junction entry) | path[2] (junction exit) | path[3] (off-screen) | path[0]==spawn? | Axial approach? |
-|------|----------|-------|-----------------|--------------------------|-------------------------|----------------------|-----------------|-----------------|
-| 0 | North | Right | (552, 48) | (552, 324) | (452, 344) | (-64, 344) | ✅ | ✅ x=552 constant |
-| 1 | North | Straight | (512, 48) | (512, 324) | (512, 444) | (512, 832) | ✅ | ✅ x=512 constant |
-| 2 | North | Left | (472, 48) | (472, 324) | (572, 344) | (1088, 344) | ✅ | ✅ x=472 constant |
-| 3 | South | Right | (472, 720) | (472, 444) | (572, 424) | (1088, 424) | ✅ | ✅ x=472 constant |
-| 4 | South | Straight | (512, 720) | (512, 444) | (512, 324) | (512, -64) | ✅ | ✅ x=512 constant |
-| 5 | South | Left | (552, 720) | (552, 444) | (452, 424) | (-64, 424) | ✅ | ✅ x=552 constant |
-| 6 | East | Right | (976, 344) | (572, 344) | (552, 444) | (552, 832) | ✅ | ✅ y=344 constant |
-| 7 | East | Straight | (976, 384) | (572, 384) | (452, 384) | (-64, 384) | ✅ | ✅ y=384 constant |
-| 8 | East | Left | (976, 424) | (572, 424) | (552, 324) | (552, -64) | ✅ | ✅ y=424 constant |
-| 9 | West | Right | (48, 424) | (452, 424) | (472, 324) | (472, -64) | ✅ | ✅ y=424 constant |
-| 10 | West | Straight | (48, 384) | (452, 384) | (572, 384) | (1088, 384) | ✅ | ✅ y=384 constant |
-| 11 | West | Left | (48, 344) | (452, 344) | (472, 444) | (472, 832) | ✅ | ✅ y=344 constant |
+| Lane | Approach | Route | spawn / path[0] | path[1] (junction entry) | path[2] (junction exit) | path[3] (off-screen) | Exit dir | path[0]==spawn? | Axial approach? |
+|------|----------|-------|-----------------|--------------------------|-------------------------|----------------------|----------|-----------------|-----------------|
+| 0 | North | Right | (552, 48) | (552, 324) | (452, 344) | (-64, 344) | WEST | ✅ | ✅ x=552 constant |
+| 1 | North | Straight | (512, 48) | (512, 324) | (512, 444) | (512, 832) | SOUTH | ✅ | ✅ x=512 constant |
+| 2 | North | Left | (472, 48) | (472, 324) | (572, 344) | (1088, 344) | EAST | ✅ | ✅ x=472 constant |
+| 3 | South | Right | (472, 720) | (472, 444) | (572, 424) | (1088, 424) | EAST | ✅ | ✅ x=472 constant |
+| 4 | South | Straight | (512, 720) | (512, 444) | (512, 324) | (512, -64) | NORTH | ✅ | ✅ x=512 constant |
+| 5 | South | Left | (552, 720) | (552, 444) | (452, 424) | (-64, 424) | WEST | ✅ | ✅ x=552 constant |
+| 6 | East | Right | (976, 344) | (572, 344) | (552, 324) | (552, -64) | NORTH | ✅ | ✅ y=344 constant |
+| 7 | East | Straight | (976, 384) | (572, 384) | (452, 384) | (-64, 384) | WEST | ✅ | ✅ y=384 constant |
+| 8 | East | Left | (976, 424) | (572, 424) | (552, 444) | (552, 832) | SOUTH | ✅ | ✅ y=424 constant |
+| 9 | West | Right | (48, 424) | (452, 424) | (472, 444) | (472, 832) | SOUTH | ✅ | ✅ y=424 constant |
+| 10 | West | Straight | (48, 384) | (452, 384) | (572, 384) | (1088, 384) | EAST | ✅ | ✅ y=384 constant |
+| 11 | West | Left | (48, 344) | (452, 344) | (472, 324) | (472, -64) | NORTH | ✅ | ✅ y=344 constant |
 
-Axial approach = path[0] and path[1] share the same perpendicular-axis coordinate (no lateral drift on the approach arm).
+Lanes 6, 8, 9, 11 (East/West turns) were corrected in this PR — path[2]/path[3] had north/south edges swapped. Axial approach = path[0] and path[1] share the same perpendicular-axis coordinate (no lateral drift on the approach arm).
 
 ## Verification Results
 
-### Automated Checks (run 2026-06-16 on Linux, no SDL2 required for tests)
+### Automated Checks (run 2026-06-17 on Linux, no SDL2 required for tests)
 
 ```
-cargo test       — 37 tests: 33 unit + 4 smoke, 0 failed
+cargo test       — 38 tests: 34 unit + 4 smoke, 0 failed
 cargo clippy -- -D warnings  — clean, no warnings
 cargo fmt --check            — pass
 cargo build                  — succeeds
 ```
 
-Test names in `src/intersection.rs` (intersection module, 7 tests):
+Test names in `src/intersection.rs` (intersection module, 8 tests):
 - `lane_registry_has_twelve_unique_lanes`
 - `each_approach_has_three_routes`
 - `lane_id_mapping_is_stable`
@@ -80,6 +81,7 @@ Test names in `src/intersection.rs` (intersection module, 7 tests):
 - `spawn_points_sit_on_approach_edges`
 - `approach_segment_is_axial_for_all_lanes` ← **new in this PR (regression)**
 - `all_lane_paths_start_at_spawn_point` ← **new in this PR**
+- `lane_exit_direction_matches_route` ← **new in this PR (regression)**
 
 A03/A04 tests confirmed passing (render, spawn, input modules):
 `road_asset_paths_are_under_assets_dir`, `layout_constants_fit_default_window`, `vehicle_dimensions_swap_for_ew_approaches`, `spawn_request_carries_lane_id`, `try_spawn_places_vehicle_on_lane_spawn_point`, `spawn_on_approach_rotates_routes`, `south/north/west/east_vehicle_moves_*`, `travel_heading_for_each_approach`, `arrow_*_spawns_*_approach`, `key_down_*`.
@@ -109,10 +111,12 @@ A full visual AUD-28 pass requires running the binary with an SDL2-capable displ
 ## Artifacts
 
 ```
-cargo test output (2026-06-16):
-  running 33 tests (unit) ... ok
-  running 4 tests (smoke) ... ok
-  test result: ok. 37 passed; 0 failed
+cargo test output (2026-06-17):
+  running 34 tests
+  test result: ok. 34 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+  running 4 tests
+  test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
 cargo clippy -- -D warnings: Finished with no warnings
 cargo fmt --check: pass

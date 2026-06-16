@@ -258,8 +258,8 @@ fn build_all_lane_paths() -> LanePathMap {
         vec![
             spawn_point_for(Cardinal::East, Route::Right), // (976, 344)
             Vec2::new(jx_e, e_r_y),                        // (572, 344) — junction east edge
-            Vec2::new(n_r_x, jy_s), // (552, 444) — south edge, right southbound lane
-            Vec2::new(n_r_x, 832.0), // off-screen south
+            Vec2::new(n_r_x, jy_n), // (552, 324) — north edge, right northbound lane
+            Vec2::new(n_r_x, -64.0), // off-screen north
         ],
     );
     map.insert(
@@ -276,8 +276,8 @@ fn build_all_lane_paths() -> LanePathMap {
         vec![
             spawn_point_for(Cardinal::East, Route::Left), // (976, 424)
             Vec2::new(jx_e, e_l_y),                       // (572, 424) — junction east edge
-            Vec2::new(s_l_x, jy_n), // (552, 324) — north edge, left northbound lane
-            Vec2::new(s_l_x, -64.0), // off-screen north
+            Vec2::new(s_l_x, jy_s), // (552, 444) — south edge, left southbound lane
+            Vec2::new(s_l_x, 832.0), // off-screen south
         ],
     );
 
@@ -287,8 +287,8 @@ fn build_all_lane_paths() -> LanePathMap {
         vec![
             spawn_point_for(Cardinal::West, Route::Right), // (48, 424)
             Vec2::new(jx_w, w_r_y),                        // (452, 424) — junction west edge
-            Vec2::new(s_r_x, jy_n), // (472, 324) — north edge, right northbound lane
-            Vec2::new(s_r_x, -64.0), // off-screen north
+            Vec2::new(s_r_x, jy_s), // (472, 444) — south edge, right southbound lane
+            Vec2::new(s_r_x, 832.0), // off-screen south
         ],
     );
     map.insert(
@@ -305,8 +305,8 @@ fn build_all_lane_paths() -> LanePathMap {
         vec![
             spawn_point_for(Cardinal::West, Route::Left), // (48, 344)
             Vec2::new(jx_w, w_l_y),                       // (452, 344) — junction west edge
-            Vec2::new(n_l_x, jy_s), // (472, 444) — south edge, left southbound lane
-            Vec2::new(n_l_x, 832.0), // off-screen south
+            Vec2::new(n_l_x, jy_n), // (472, 324) — north edge, left northbound lane
+            Vec2::new(n_l_x, -64.0), // off-screen north
         ],
     );
 
@@ -455,6 +455,56 @@ mod tests {
                 lane.path[0], lane.spawn_point,
                 "path[0] mismatch for {:?} {:?}",
                 lane.approach, lane.route
+            );
+        }
+    }
+
+    #[test]
+    fn lane_exit_direction_matches_route() {
+        // path[3] must be off-screen past the edge implied by the route.
+        // Travel directions: N→S, S→N, E→W, W→E.
+        // Right = 90° CW from travel; Left = 90° CCW.
+        //   North  Right→WEST   Straight→SOUTH  Left→EAST
+        //   South  Right→EAST   Straight→NORTH  Left→WEST
+        //   East   Right→NORTH  Straight→WEST   Left→SOUTH
+        //   West   Right→SOUTH  Straight→EAST   Left→NORTH
+        let model = IntersectionModel::new();
+        let expected_exit = |approach: Cardinal, route: Route| -> &'static str {
+            match (approach, route) {
+                (Cardinal::North, Route::Right) => "WEST",
+                (Cardinal::North, Route::Straight) => "SOUTH",
+                (Cardinal::North, Route::Left) => "EAST",
+                (Cardinal::South, Route::Right) => "EAST",
+                (Cardinal::South, Route::Straight) => "NORTH",
+                (Cardinal::South, Route::Left) => "WEST",
+                (Cardinal::East, Route::Right) => "NORTH",
+                (Cardinal::East, Route::Straight) => "WEST",
+                (Cardinal::East, Route::Left) => "SOUTH",
+                (Cardinal::West, Route::Right) => "SOUTH",
+                (Cardinal::West, Route::Straight) => "EAST",
+                (Cardinal::West, Route::Left) => "NORTH",
+            }
+        };
+        let w = crate::config::WINDOW_WIDTH as f32;
+        let h = crate::config::WINDOW_HEIGHT as f32;
+        for lane in &model.lanes {
+            let p3 = lane.path[3];
+            let actual = if p3.x < 0.0 {
+                "WEST"
+            } else if p3.x > w {
+                "EAST"
+            } else if p3.y < 0.0 {
+                "NORTH"
+            } else if p3.y > h {
+                "SOUTH"
+            } else {
+                "NONE (not off-screen)"
+            };
+            let expected = expected_exit(lane.approach, lane.route);
+            assert_eq!(
+                actual, expected,
+                "{:?} {:?}: expected exit {} but path[3] = ({}, {})",
+                lane.approach, lane.route, expected, p3.x, p3.y
             );
         }
     }
