@@ -114,8 +114,10 @@ impl SpawnSystem {
         approach: Cardinal,
         model: &IntersectionModel,
     ) -> Option<VehicleId> {
-        let route = self.next_route_for_approach(approach);
-        self.try_spawn(SpawnRequest::new(approach, route), model)
+        let route = self.route_for_approach(approach);
+        let id = self.try_spawn(SpawnRequest::new(approach, route), model)?;
+        self.advance_route_for_approach(approach);
+        Some(id)
     }
 
     /// Advance movement along lane paths and remove vehicles that left the canvas.
@@ -133,11 +135,14 @@ impl SpawnSystem {
         self.vehicles.retain(|v| v.state != VehicleState::Done);
     }
 
-    fn next_route_for_approach(&mut self, approach: Cardinal) -> Route {
+    fn route_for_approach(&self, approach: Cardinal) -> Route {
+        let count = self.route_counters.get(&approach).copied().unwrap_or(0);
+        Route::ALL[count as usize % Route::ALL.len()]
+    }
+
+    fn advance_route_for_approach(&mut self, approach: Cardinal) {
         let count = self.route_counters.entry(approach).or_insert(0);
-        let route = Route::ALL[*count as usize % Route::ALL.len()];
         *count = count.wrapping_add(1);
-        route
     }
 }
 
@@ -262,6 +267,31 @@ mod tests {
         assert!(cooldown.allows_at(Cardinal::North, t0));
         assert!(cooldown.allows_at(Cardinal::West, t0));
         assert!(cooldown.allows_at(Cardinal::East, t0));
+    }
+
+    #[test]
+    fn spawn_on_approach_does_not_advance_route_on_cooldown_reject() {
+        let model = IntersectionModel::new();
+        let mut spawn = SpawnSystem::new();
+
+        let id1 = spawn
+            .spawn_on_approach(Cardinal::West, &model)
+            .expect("first spawn should succeed");
+        assert_eq!(
+            spawn.vehicles().iter().find(|v| v.id == id1).unwrap().route,
+            Route::Right
+        );
+
+        assert!(spawn.spawn_on_approach(Cardinal::West, &model).is_none());
+
+        expire_cooldown(&mut spawn, Cardinal::West);
+        let id2 = spawn
+            .spawn_on_approach(Cardinal::West, &model)
+            .expect("second spawn should succeed after cooldown");
+        assert_eq!(
+            spawn.vehicles().iter().find(|v| v.id == id2).unwrap().route,
+            Route::Straight
+        );
     }
 
     #[test]
