@@ -9,6 +9,7 @@ use smart_road::intersection::{lane_id, Cardinal, IntersectionModel, Route};
 use smart_road::smart::SmartController;
 use smart_road::spawn::{SpawnRequest, SpawnSystem};
 use smart_road::stats::Stats;
+use smart_road::vehicle::VehicleState;
 
 #[test]
 fn crate_smoke_config_constants() {
@@ -64,4 +65,32 @@ fn crate_smoke_arrow_spawn_pipeline() {
         let events: Vec<_> = input.drain_events().collect();
         assert_eq!(events, vec![InputEvent::SpawnCardinal(expected_approach)]);
     }
+}
+
+#[test]
+fn crate_smoke_spawn_smart_detection_pipeline() {
+    let model = IntersectionModel::new();
+    let mut spawn = SpawnSystem::new();
+    let mut smart = SmartController::new();
+
+    spawn
+        .try_spawn(SpawnRequest::new(Cardinal::South, Route::Straight), &model)
+        .expect("spawn succeeds");
+    assert_eq!(spawn.vehicles()[0].state, VehicleState::Approaching);
+
+    for _ in 0..200 {
+        spawn.update(&model, FIXED_TIMESTEP_SECS);
+        smart.update(spawn.vehicles_mut(), &model, FIXED_TIMESTEP_SECS);
+        if spawn.vehicles()[0].state == VehicleState::Managed {
+            break;
+        }
+    }
+
+    assert_eq!(
+        spawn.vehicles()[0].state,
+        VehicleState::Managed,
+        "vehicle should enter Managed after spawn physics + smart detection"
+    );
+    assert_eq!(spawn.vehicles()[0].time_in_crossing, 0.0);
+    assert_eq!(spawn.vehicles()[0].distance_in_crossing, 0.0);
 }

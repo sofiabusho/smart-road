@@ -13,7 +13,15 @@ Implements **smart-system zone detection** per SDS §6.1 and §13.4. `SmartContr
 - **`src/smart.rs`**: `on_vehicle_enter_zone()`, `update()`, ray-casting `point_in_polygon()`; 6 unit tests for detection transitions and timer start.
 - **`src/app.rs`**: Calls `smart.update()` after `spawn.update()` each tick.
 - **`src/spawn.rs`**: Adds `vehicles_mut()` for smart-system access to the vehicle list.
-- **`scripts/setup-sdl2-windows.ps1`**: Windows SDL2 setup helper for local build/test.
+- **`docs/SDS.md`**: §13.1 cross-track ownership updated for C01 `app.rs` / `spawn.rs` edits; §13.2 `vehicles_mut()`; §13.4 `on_vehicle_enter_zone` signature aligned with implementation.
+- **`tests/smoke.rs`**: Headless smoke test for spawn → physics → smart detection pipeline.
+
+## Cross-track edits (announced per SDS §13.1)
+
+| File | Owner | C01 change |
+|------|-------|------------|
+| `src/app.rs` | A | Wire `SmartController::update()` in tick loop after `spawn.update()` |
+| `src/spawn.rs` | A | Add `SpawnSystem::vehicles_mut()` for smart-system vehicle access |
 
 ## Technical Decisions
 
@@ -26,7 +34,7 @@ Implements **smart-system zone detection** per SDS §6.1 and §13.4. `SmartContr
 
 ### Automated Checks
 
-- [x] `cargo test` — 40 unit + 4 smoke tests passed
+- [x] `cargo test` — 40 unit + 5 smoke tests passed
 - [x] `cargo clippy -- -D warnings` — passes
 - [x] `cargo fmt --check` — passes
 - [x] `cargo build` — succeeds (with SDL2 configured)
@@ -47,8 +55,8 @@ Implements **smart-system zone detection** per SDS §6.1 and §13.4. `SmartContr
 - **Test output**:
   ```text
   running 40 tests (unit) ... ok
-  running 4 tests (smoke) ... ok
-  test result: ok. 44 passed; 0 failed
+  running 5 tests (smoke) ... ok
+  test result: ok. 45 passed; 0 failed
   ```
 - **Lint output**: `cargo clippy -- -D warnings` clean.
 - **Format output**: `cargo fmt --check` clean.
