@@ -1,28 +1,52 @@
 //! Keyboard-driven vehicle spawning (A04+).
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use crate::intersection::{Cardinal, IntersectionModel, LaneId, Route, Vec2};
 use crate::vehicle::{spawn_vehicle, Vehicle, VehicleId, VehicleState};
 
-/// Per-direction spawn throttle (A05 implements real cooldown).
-#[derive(Debug, Default)]
+/// Per-direction spawn throttle (REQ-18 / AUD-27).
+#[derive(Debug)]
 pub struct SpawnCooldown {
-    // A05: per_direction_ms, last_spawn timestamps
+    per_direction_ms: u64,
+    last_spawn: HashMap<Cardinal, Instant>,
 }
 
 impl SpawnCooldown {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            per_direction_ms: crate::config::SPAWN_COOLDOWN_MS,
+            last_spawn: HashMap::new(),
+        }
     }
 
-    /// Whether a spawn on this approach is allowed (always true until A05).
-    pub fn allows(&mut self, _approach: Cardinal) -> bool {
-        true
+    /// Whether a spawn on this approach is allowed right now.
+    pub fn allows(&self, approach: Cardinal) -> bool {
+        self.allows_at(approach, Instant::now())
     }
 
-    /// Record a successful spawn (no-op until A05).
-    pub fn record(&mut self, _approach: Cardinal) {}
+    /// Record a successful spawn on this approach.
+    pub fn record(&mut self, approach: Cardinal) {
+        self.record_at(approach, Instant::now());
+    }
+
+    fn allows_at(&self, approach: Cardinal, now: Instant) -> bool {
+        match self.last_spawn.get(&approach) {
+            None => true,
+            Some(&last) => now.duration_since(last) >= Duration::from_millis(self.per_direction_ms),
+        }
+    }
+
+    fn record_at(&mut self, approach: Cardinal, now: Instant) {
+        self.last_spawn.insert(approach, now);
+    }
+}
+
+impl Default for SpawnCooldown {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Request to create a vehicle on an approach (SDS §13.2).
@@ -162,17 +186,20 @@ mod tests {
     fn spawn_on_approach_rotates_routes() {
         let model = IntersectionModel::new();
         let mut spawn = SpawnSystem::new();
+        let expected = [Route::Right, Route::Straight, Route::Left, Route::Right];
 
-        spawn.spawn_on_approach(Cardinal::West, &model);
-        spawn.spawn_on_approach(Cardinal::West, &model);
-        spawn.spawn_on_approach(Cardinal::West, &model);
-        spawn.spawn_on_approach(Cardinal::West, &model);
+        for &route in &expected {
+            expire_cooldown(&mut spawn, Cardinal::West);
+            spawn
+                .spawn_on_approach(Cardinal::West, &model)
+                .expect("spawn should succeed after cooldown");
+            assert_eq!(spawn.vehicles().last().unwrap().route, route);
+        }
+    }
 
-        let routes: Vec<_> = spawn.vehicles().iter().map(|v| v.route).collect();
-        assert_eq!(routes[0], Route::Right);
-        assert_eq!(routes[1], Route::Straight);
-        assert_eq!(routes[2], Route::Left);
-        assert_eq!(routes[3], Route::Right);
+    fn expire_cooldown(spawn: &mut SpawnSystem, approach: Cardinal) {
+        let expired = Instant::now() - Duration::from_millis(crate::config::SPAWN_COOLDOWN_MS);
+        spawn.cooldown.record_at(approach, expired);
     }
 
     #[test]
@@ -213,6 +240,51 @@ mod tests {
         let x0 = spawn.vehicles()[0].position.x;
         spawn.update(&IntersectionModel::new(), 1.0);
         assert!(spawn.vehicles()[0].position.x < x0);
+    }
+
+    #[test]
+    fn cooldown_blocks_rapid_same_direction_spawns() {
+        let mut cooldown = SpawnCooldown::new();
+        let t0 = Instant::now();
+        assert!(cooldown.allows_at(Cardinal::South, t0));
+        cooldown.record_at(Cardinal::South, t0);
+        assert!(!cooldown.allows_at(Cardinal::South, t0));
+        let t1 = t0 + Duration::from_millis(crate::config::SPAWN_COOLDOWN_MS);
+        assert!(cooldown.allows_at(Cardinal::South, t1));
+    }
+
+    #[test]
+    fn cooldown_is_per_direction() {
+        let mut cooldown = SpawnCooldown::new();
+        let t0 = Instant::now();
+        cooldown.record_at(Cardinal::South, t0);
+        assert!(!cooldown.allows_at(Cardinal::South, t0));
+        assert!(cooldown.allows_at(Cardinal::North, t0));
+        assert!(cooldown.allows_at(Cardinal::West, t0));
+        assert!(cooldown.allows_at(Cardinal::East, t0));
+    }
+
+    #[test]
+    fn try_spawn_rejects_rapid_duplicate_on_same_approach() {
+        let model = IntersectionModel::new();
+        let mut spawn = SpawnSystem::new();
+        let req = SpawnRequest::new(Cardinal::South, Route::Straight);
+        assert!(spawn.try_spawn(req, &model).is_some());
+        assert!(spawn.try_spawn(req, &model).is_none());
+        assert_eq!(spawn.vehicles().len(), 1);
+    }
+
+    #[test]
+    fn try_spawn_allows_different_approaches_without_cooldown_gap() {
+        let model = IntersectionModel::new();
+        let mut spawn = SpawnSystem::new();
+        assert!(spawn
+            .try_spawn(SpawnRequest::new(Cardinal::South, Route::Straight), &model)
+            .is_some());
+        assert!(spawn
+            .try_spawn(SpawnRequest::new(Cardinal::North, Route::Straight), &model)
+            .is_some());
+        assert_eq!(spawn.vehicles().len(), 2);
     }
 
     #[test]
