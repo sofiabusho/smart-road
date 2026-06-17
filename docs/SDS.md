@@ -326,10 +326,10 @@ Three developers work tracks **A**, **B**, and **C** per `docs/ticket-tracker.md
 
 | Module / file | Owner track | Notes |
 |---------------|-------------|-------|
-| `main.rs`, `app.rs` | **A** (A01) | C07 may add session-end hook only via `App::end_session()` — no direct edits without SDS update |
+| `main.rs`, `app.rs` | **A** (A01) | **C01** may wire `SmartController::update()` in the tick loop; **C07** adds `App::end_session()` — cross-track edits require SDS update + PR note |
 | `config.rs` | **A** (A01) | B/C propose constants via ticket PR; A merges tunables |
 | `intersection.rs` | **A** (A03) + **B** (B02) | A owns topology + render-facing layout; B owns `path: Vec<Vec2>` per lane — separate impl blocks or `lane_paths` submodule |
-| `spawn.rs`, `input.rs` | **A** | |
+| `spawn.rs`, `input.rs` | **A** | **C01** may add `SpawnSystem::vehicles_mut()` for smart-system vehicle access |
 | `render.rs` | **A** (A03, A07) | Reads `VehicleRenderSnapshot` only — no mutation |
 | `vehicle.rs` | **B** (B01) | **A04 stub** (IF-1): `spawn_vehicle`, `approach` / `position` / `heading_rad` fields; B01 owns physics and `VehicleId` allocation |
 | `smart.rs` | **C** | |
@@ -387,6 +387,7 @@ impl SpawnSystem {
     pub fn spawn_on_approach(&mut self, approach: Cardinal, model: &IntersectionModel) -> Option<VehicleId>;
     pub fn update(&mut self, model: &IntersectionModel, dt: f32);  // B02: signature updated to accept model for advance_along_path
     pub fn vehicles(&self) -> &[Vehicle];
+    pub fn vehicles_mut(&mut self) -> &mut [Vehicle];  // C01: smart-system zone detection
 }
 
 // input.rs (A04+)
@@ -471,7 +472,7 @@ Delivered by **C01**–**C07**; **C01** needs B02 paths + A03 `zone_polygon`.
 pub struct SmartController { /* reservations, config */ }
 
 impl SmartController {
-    pub fn on_vehicle_enter_zone(&mut self, v: &mut Vehicle, model: &IntersectionModel);
+    pub fn on_vehicle_enter_zone(&mut self, v: &mut Vehicle);
     pub fn update(&mut self, vehicles: &mut [Vehicle], model: &IntersectionModel, dt: f32);
     // sets vehicle.commanded_velocity in Managed state only
 }

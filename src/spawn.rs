@@ -92,6 +92,11 @@ impl SpawnSystem {
         &self.vehicles
     }
 
+    /// Mutable access for smart-system updates (C01+).
+    pub fn vehicles_mut(&mut self) -> &mut [Vehicle] {
+        &mut self.vehicles
+    }
+
     /// Attempt to spawn a vehicle from a request. Returns `None` if cooldown rejects.
     pub fn try_spawn(&mut self, req: SpawnRequest, model: &IntersectionModel) -> Option<VehicleId> {
         if !self.cooldown.allows(req.approach) {
