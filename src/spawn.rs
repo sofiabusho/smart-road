@@ -363,12 +363,33 @@ mod tests {
         let mut spawn = SpawnSystem::new();
 
         let id1 = spawn.spawn_random(&model).expect("first random spawn");
-        assert!(spawn.spawn_random(&model).is_none());
-        assert_eq!(spawn.vehicles().len(), 1);
+        let approach = spawn
+            .vehicles()
+            .iter()
+            .find(|v| v.id == id1)
+            .expect("spawned vehicle")
+            .approach;
 
-        expire_cooldown_for_vehicle(&mut spawn, id1);
-        assert!(spawn.spawn_random(&model).is_some());
+        // Cooldown applies to the spawned approach only (not a global block).
+        assert!(spawn
+            .try_spawn(SpawnRequest::new(approach, Route::Straight), &model)
+            .is_none());
+
+        let other = Cardinal::ALL
+            .iter()
+            .copied()
+            .find(|c| *c != approach)
+            .expect("another approach exists");
+        assert!(spawn
+            .try_spawn(SpawnRequest::new(other, Route::Straight), &model)
+            .is_some());
         assert_eq!(spawn.vehicles().len(), 2);
+
+        expire_cooldown(&mut spawn, approach);
+        assert!(spawn
+            .try_spawn(SpawnRequest::new(approach, Route::Left), &model)
+            .is_some());
+        assert_eq!(spawn.vehicles().len(), 3);
     }
 
     #[test]
@@ -393,16 +414,6 @@ mod tests {
             "all approaches appear"
         );
         assert_eq!(routes.len(), Route::ALL.len(), "all routes appear");
-    }
-
-    fn expire_cooldown_for_vehicle(spawn: &mut SpawnSystem, id: VehicleId) {
-        let approach = spawn
-            .vehicles()
-            .iter()
-            .find(|v| v.id == id)
-            .expect("vehicle exists")
-            .approach;
-        expire_cooldown(spawn, approach);
     }
 
     fn expire_all_cooldowns(spawn: &mut SpawnSystem) {
