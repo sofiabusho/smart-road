@@ -10,7 +10,7 @@ Implements **continuous random vehicle spawn** while `R` is held. Each game-loop
 
 ## Key Changes
 
-- **`src/spawn.rs`**: `SpawnRng` (xorshift32, no new dependency), `SpawnSystem::spawn_random`, unit tests for cooldown respect and approach/route variety.
+- **`src/spawn.rs`**: `SpawnRng` (xorshift32, no new dependency), `SpawnSystem::spawn_random`, unit tests for per-direction cooldown (same approach blocked, others allowed) and approach/route variety.
 - **`src/input.rs`**: `random_stream_active` flag tracked across `R` key down/up; `random_stream_active()` query for the game loop.
 - **`src/app.rs`**: Calls `spawn_random` each frame while `R` is held.
 - **`tests/smoke.rs`**: Integration test for `R` → random spawn pipeline.
@@ -34,7 +34,7 @@ Implements **continuous random vehicle spawn** while `R` is held. Each game-loop
 
 ### Manual Audit (against `docs/audit.md`)
 
-- [x] **AUD-7**: Pass — Hold `R` for several seconds: vehicles appear from multiple approaches with varied routes (r/s/l). Verified by unit test `spawn_random_produces_varied_approaches_and_routes` (80 spawns cover all 4 approaches and 3 routes) and manual `cargo run` hold-`R` observation.
+- [x] **AUD-7**: Pass — Hold `R` for several seconds: vehicles appear from multiple approaches with varied routes (r/s/l). Verified by unit tests `spawn_random_produces_varied_approaches_and_routes` (80 spawns cover all 4 approaches and 3 routes) and `spawn_random_respects_per_direction_cooldown` (per-direction throttle after random spawn), plus manual `cargo run` hold-`R` observation.
 - [x] **AUD-31**: N/A — Velocity levels (≥3 distinct speeds) are **B03** scope; all random spawns use `DEFAULT_SPAWN_VELOCITY` until B03 lands.
 
 ### Requirements Traceability
