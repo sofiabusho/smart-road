@@ -167,11 +167,12 @@ impl SpawnSystem {
 
     /// Advance movement along lane paths and remove vehicles that left the canvas.
     pub fn update(&mut self, model: &IntersectionModel, dt: f32) {
+        crate::vehicle::enforce_follow_distance(&mut self.vehicles, crate::config::SAFE_DISTANCE);
+
         for vehicle in &mut self.vehicles {
             if vehicle.state == VehicleState::Done {
                 continue;
             }
-            crate::vehicle::integrate_physics(vehicle, dt);
             crate::vehicle::advance_along_path(vehicle, model, dt);
             if is_off_screen(vehicle.position) {
                 vehicle.state = VehicleState::Done;
