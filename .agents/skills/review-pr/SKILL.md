@@ -23,7 +23,7 @@ Use this skill when the user asks to review, check, or audit a PR for **smart-ro
    - If already on the PR branch, continue
 
 2. **Identify the ticket**
-   - Parse ticket ID from branch (`feat/A04-*`), PR title, or `docs/pr-messages/`
+   - Parse ticket ID from branch (e.g. `andy/A04-*`), PR title, or `docs/pr-messages/`
    - Load the ticket row from `docs/ticket-tracker.md`
    - Load `docs/pr-messages/{TicketID}-*-pr.md` if it exists
 

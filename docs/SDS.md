@@ -378,7 +378,7 @@ pub struct SpawnRequest {
     pub lane_id: LaneId,
 }
 
-pub struct SpawnCooldown { /* A05: per-direction throttle */ }
+pub struct SpawnCooldown { per_direction_ms: u64, last_spawn: HashMap<Cardinal, Instant> }
 
 pub struct SpawnSystem { /* vehicles, route_counters, cooldown */ }
 

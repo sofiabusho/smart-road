@@ -158,16 +158,15 @@ cargo build --release    # Release build (when needed)
 | Branch | Purpose |
 |--------|---------|
 | `main` | Stable, audit-ready code |
-| `feat/A01-short-desc` | Track A feature branches |
-| `feat/B02-routes` | Track B feature branches |
-| `feat/C03-yield` | Track C feature branches |
-| `fix/<ticket-id>-<short-desc>` | Bug fix branches (same `A##` / `B##` / `C##` prefix) |
+| `{username}/{ticket-id}` | Per-ticket work branches (e.g. `andy/B02`, `andy/A04-arrow-spawn`) — named by the developer |
 
 Commit messages: `feat(A01): add SDL2 window and empty loop` (type, track ticket ID, short description)
 
+Agents do not create or rename branches; developers choose their own `{username}/{ticket-id}` branch.
+
 ### Multi-developer rules
 
-- **One ticket per branch** — branch name matches tracker ID (`feat/B04-safe-distance`).
+- **One ticket per branch** — each developer works on `{username}/{ticket-id}` (optional short suffix).
 - **Stay in your track's modules** — see file ownership in `docs/SDS.md` §13.1; do not edit another track's owned files without updating the interface section first.
 - **Cross-track deps** — if ticket lists a 🔗 dep (e.g., `B01` needs `A04`), that ticket must be ✅ before you start.
 - **PR message path** — `docs/pr-messages/A01-short-desc-pr.md` (track prefix required).

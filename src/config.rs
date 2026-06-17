@@ -48,6 +48,9 @@ pub const EW_ARM_LENGTH: f32 = INTERSECTION_CENTER_X - INTERSECTION_HALF_SIZE - 
 /// Default cruise speed for newly spawned vehicles (world units per second).
 pub const DEFAULT_SPAWN_VELOCITY: f32 = 120.0;
 
+/// Minimum milliseconds between spawns on the same approach (REQ-18).
+pub const SPAWN_COOLDOWN_MS: u64 = 400;
+
 /// Vehicle sprite width in world units (pixels at 1:1 scale).
 pub const VEHICLE_WIDTH: f32 = 22.0;
 
