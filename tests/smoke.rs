@@ -4,7 +4,7 @@ use smart_road::config::{
     FIXED_TIMESTEP_SECS, TARGET_FPS, WINDOW_HEIGHT, WINDOW_TITLE, WINDOW_WIDTH,
 };
 use smart_road::input::{approach_for_arrow, InputEvent, InputState};
-use smart_road::intersection::{lane_id, Cardinal, IntersectionModel, Route};
+use smart_road::intersection::{lane_id, Cardinal, IntersectionModel, Route, Vec2};
 use smart_road::smart::SmartController;
 use smart_road::spawn::{SpawnRequest, SpawnSystem};
 use smart_road::stats::Stats;
@@ -99,4 +99,59 @@ fn crate_smoke_spawn_smart_detection_pipeline() {
     );
     assert_eq!(spawn.vehicles()[0].time_in_crossing, 0.0);
     assert_eq!(spawn.vehicles()[0].distance_in_crossing, 0.0);
+}
+
+#[test]
+fn crate_smoke_same_approach_follower_slows_behind_stopped_leader() {
+    use std::thread;
+    use std::time::Duration;
+
+    use smart_road::config::{SAFE_DISTANCE, SPAWN_COOLDOWN_MS};
+    use smart_road::vehicle::VelocityLevel;
+
+    let model = IntersectionModel::new();
+    let mut spawn = SpawnSystem::new();
+    let req = SpawnRequest::new(Cardinal::South, Route::Straight);
+    let fast_speed = VelocityLevel::Fast.speed();
+
+    spawn.try_spawn(req, &model).expect("leader spawn succeeds");
+    thread::sleep(Duration::from_millis(SPAWN_COOLDOWN_MS + 10));
+    spawn
+        .try_spawn(req, &model)
+        .expect("follower spawn succeeds after cooldown");
+
+    assert_eq!(spawn.vehicles().len(), 2);
+    assert_eq!(spawn.vehicles()[0].lane_id, spawn.vehicles()[1].lane_id);
+    assert_eq!(spawn.vehicles()[0].approach, Cardinal::South);
+
+    let lane_x = spawn.vehicles()[0].position.x;
+    spawn.vehicles_mut()[0].position = Vec2::new(lane_x, 500.0);
+    spawn.vehicles_mut()[0].commanded_velocity = 0.0;
+    spawn.vehicles_mut()[0].velocity = 0.0;
+    spawn.vehicles_mut()[1].position = Vec2::new(lane_x, 500.0 + SAFE_DISTANCE * 2.0);
+    spawn.vehicles_mut()[1].commanded_velocity = fast_speed;
+    spawn.vehicles_mut()[1].velocity = fast_speed;
+
+    let mut saw_slowdown = false;
+    for _ in 0..400 {
+        spawn.update(&model, FIXED_TIMESTEP_SECS);
+
+        let leader = &spawn.vehicles()[0];
+        let follower = &spawn.vehicles()[1];
+        let gap = follower.position.y - leader.position.y;
+
+        assert!(
+            gap >= SAFE_DISTANCE * 0.9,
+            "follower must stay behind stopped leader (gap={gap})"
+        );
+
+        if follower.velocity < fast_speed {
+            saw_slowdown = true;
+        }
+    }
+
+    assert!(
+        saw_slowdown,
+        "follower should slow behind stopped leader on same lane"
+    );
 }

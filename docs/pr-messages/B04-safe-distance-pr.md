@@ -13,6 +13,7 @@ Implements **same-lane safe-distance follow logic** per SDS §13.3 and REQ-8/REQ
 - **`src/config.rs`**: `SAFE_DISTANCE` (40 world units, ≥ `VEHICLE_LENGTH`).
 - **`src/vehicle.rs`**: `enforce_follow_distance()`, `detect_close_call()`, longitudinal gap helper; crossing metrics now accumulate inside `advance_along_path`.
 - **`src/spawn.rs`**: Call `enforce_follow_distance` each tick; remove duplicate `integrate_physics` call (DEF-01 fix).
+- **`tests/smoke.rs`**: `crate_smoke_same_approach_follower_slows_behind_stopped_leader` — full spawn pipeline manual scenario.
 
 ## Cross-track edits (announced per SDS §13.1)
 
@@ -31,10 +32,11 @@ Implements **same-lane safe-distance follow logic** per SDS §13.3 and REQ-8/REQ
 
 ### Automated Checks
 
-- [x] `cargo test` — 56 unit + 6 smoke = 62 passed
+- [x] `cargo test` — 56 unit + 7 smoke = 63 passed
 - [x] `cargo clippy -- -D warnings` — passes
 - [x] `cargo fmt --check` — passes
-- [x] `cargo build` — succeeds (SDL2 configured)
+- [x] `cargo build` / `cargo run` — succeeds (SDL2 configured; window launches)
+- [x] **Manual (AUD-30 scenario)**: Two vehicles on south straight lane — follower slows behind stopped leader; verified by `crate_smoke_same_approach_follower_slows_behind_stopped_leader` (spawn → cooldown → same lane → `SpawnSystem::update` loop)
 
 ### Manual Audit (against `docs/audit.md`)
 
@@ -51,8 +53,8 @@ Implements **same-lane safe-distance follow logic** per SDS §13.3 and REQ-8/REQ
 - **Test output**:
   ```text
   running 56 tests (unit) ... ok
-  running 6 tests (smoke) ... ok
-  test result: ok. 62 passed; 0 failed
+  running 7 tests (smoke) ... ok
+  test result: ok. 63 passed; 0 failed
   ```
 - **Lint output**: `cargo clippy -- -D warnings` clean.
 
