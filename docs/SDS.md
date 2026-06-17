@@ -385,6 +385,7 @@ pub struct SpawnSystem { /* vehicles, route_counters, cooldown */ }
 impl SpawnSystem {
     pub fn try_spawn(&mut self, req: SpawnRequest, model: &IntersectionModel) -> Option<VehicleId>;
     pub fn spawn_on_approach(&mut self, approach: Cardinal, model: &IntersectionModel) -> Option<VehicleId>;
+    pub fn spawn_random(&mut self, model: &IntersectionModel) -> Option<VehicleId>;  // REQ-16 / A06
     pub fn update(&mut self, model: &IntersectionModel, dt: f32);  // B02: signature updated to accept model for advance_along_path
     pub fn vehicles(&self) -> &[Vehicle];
 }
@@ -397,6 +398,8 @@ pub enum InputEvent {
     RandomStream(bool),   // R key down/up (A06)
     Exit,                 // Esc (C06)
 }
+
+// InputState tracks `random_stream_active` while R is held (A06).
 
 // render.rs (A03, A07)
 pub struct RoadAssets<'tex> { /* BMP textures + layout dims */ }
