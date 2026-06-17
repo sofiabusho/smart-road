@@ -121,7 +121,7 @@ Execution order:
 
 | ID | Status | Ticket | Size | Deps | REQ / AUD | Verification gate | Track |
 |----|--------|--------|------|------|-----------|-------------------|-------|
-| C01 | ⬜ | **Smart detection + timer start**: managed zone entry | M | B02 🔗 | REQ-3, REQ-4, REQ-23 | AUD-25, AUD-26 (with C06) | C |
+| C01 | ✅ | **Smart detection + timer start**: managed zone entry | M | B02 🔗 | REQ-3, REQ-4, REQ-23 | AUD-25, AUD-26 (with C06) | C |
 | C02 | ⬜ | **Smart scheduler**: velocity/time coordination | L | C01, B03 🔗, B04 🔗 | REQ-3, REQ-9 · AUD-8–AUD-14 | AUD-8–AUD-14 | C |
 | C03 | ⬜ | **Yield on conflict**: slowdown avoidance | M | C02 | REQ-9 · AUD-15 | AUD-15 | C |
 | C04 | ⬜ | **Sustained traffic**: R ≥1 min, congestion cap | M | C02, A06 🔗 | REQ-3 · AUD-16, AUD-17 | AUD-16, AUD-17 | C |
