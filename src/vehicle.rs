@@ -54,7 +54,7 @@ pub struct Vehicle {
 }
 
 /// Create a vehicle at a lane spawn point (IF-1: B allocates id; A04 factory stub).
-pub fn spawn_vehicle(id: VehicleId, lane: &LaneInfo, velocity: f32) -> Vehicle {
+pub fn spawn_vehicle(id: VehicleId, lane: &LaneInfo, _velocity: f32) -> Vehicle {
     let level = match id.0 % 3 {
         0 => VelocityLevel::Fast,
         1 => VelocityLevel::Cruise,
@@ -67,7 +67,7 @@ pub fn spawn_vehicle(id: VehicleId, lane: &LaneInfo, velocity: f32) -> Vehicle {
         approach: lane.approach,
         position: lane.spawn_point,
         heading_rad: lane.approach.travel_heading(),
-        velocity,
+        velocity: level.speed(),
         commanded_velocity: level.speed(),
         state: VehicleState::Approaching,
         path_index: 0,
