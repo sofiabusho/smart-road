@@ -99,14 +99,16 @@ impl App {
                 InputEvent::SpawnCardinal(approach) => {
                     self.spawn.spawn_on_approach(approach, &self.intersection);
                 }
-                InputEvent::RandomStream(_) => {
-                    // A06: continuous random spawn while R is held.
-                }
+                InputEvent::RandomStream(_) => {}
                 InputEvent::Exit => {
                     // C06 replaces this with end_session + stats window.
                     self.running = false;
                 }
             }
+        }
+
+        if self.input.random_stream_active() {
+            self.spawn.spawn_random(&self.intersection);
         }
 
         self.spawn.update(&self.intersection, FIXED_TIMESTEP_SECS);

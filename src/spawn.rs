@@ -6,6 +6,37 @@ use std::time::{Duration, Instant};
 use crate::intersection::{Cardinal, IntersectionModel, LaneId, Route, Vec2};
 use crate::vehicle::{spawn_vehicle, Vehicle, VehicleId, VehicleState};
 
+/// Lightweight PRNG for spawn randomization (no extra crate dependency).
+#[derive(Debug, Clone)]
+struct SpawnRng {
+    state: u32,
+}
+
+impl SpawnRng {
+    fn new() -> Self {
+        let seed = Instant::now().elapsed().as_nanos() as u32;
+        Self { state: seed.max(1) }
+    }
+
+    fn next_u32(&mut self) -> u32 {
+        // xorshift32
+        let mut x = self.state;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        self.state = x;
+        x
+    }
+
+    fn pick_cardinal(&mut self) -> Cardinal {
+        Cardinal::ALL[self.next_u32() as usize % Cardinal::ALL.len()]
+    }
+
+    fn pick_route(&mut self) -> Route {
+        Route::ALL[self.next_u32() as usize % Route::ALL.len()]
+    }
+}
+
 /// Per-direction spawn throttle (REQ-18 / AUD-27).
 #[derive(Debug)]
 pub struct SpawnCooldown {
@@ -75,6 +106,7 @@ pub struct SpawnSystem {
     next_id: u64,
     route_counters: HashMap<Cardinal, u8>,
     cooldown: SpawnCooldown,
+    rng: SpawnRng,
 }
 
 impl SpawnSystem {
@@ -84,6 +116,7 @@ impl SpawnSystem {
             next_id: 1,
             route_counters: HashMap::new(),
             cooldown: SpawnCooldown::new(),
+            rng: SpawnRng::new(),
         }
     }
 
@@ -106,6 +139,13 @@ impl SpawnSystem {
         self.vehicles.push(vehicle);
         self.cooldown.record(req.approach);
         Some(id)
+    }
+
+    /// Spawn with a random approach and route (REQ-16 / AUD-7).
+    pub fn spawn_random(&mut self, model: &IntersectionModel) -> Option<VehicleId> {
+        let approach = self.rng.pick_cardinal();
+        let route = self.rng.pick_route();
+        self.try_spawn(SpawnRequest::new(approach, route), model)
     }
 
     /// Spawn on an approach, rotating through r/s/l lanes (PRD OQ-6).
@@ -315,6 +355,60 @@ mod tests {
             .try_spawn(SpawnRequest::new(Cardinal::North, Route::Straight), &model)
             .is_some());
         assert_eq!(spawn.vehicles().len(), 2);
+    }
+
+    #[test]
+    fn spawn_random_respects_per_direction_cooldown() {
+        let model = IntersectionModel::new();
+        let mut spawn = SpawnSystem::new();
+
+        let id1 = spawn.spawn_random(&model).expect("first random spawn");
+        assert!(spawn.spawn_random(&model).is_none());
+        assert_eq!(spawn.vehicles().len(), 1);
+
+        expire_cooldown_for_vehicle(&mut spawn, id1);
+        assert!(spawn.spawn_random(&model).is_some());
+        assert_eq!(spawn.vehicles().len(), 2);
+    }
+
+    #[test]
+    fn spawn_random_produces_varied_approaches_and_routes() {
+        let model = IntersectionModel::new();
+        let mut spawn = SpawnSystem::new();
+        let mut approaches = std::collections::HashSet::new();
+        let mut routes = std::collections::HashSet::new();
+
+        for _ in 0..80 {
+            if let Some(id) = spawn.spawn_random(&model) {
+                let vehicle = spawn.vehicles().iter().find(|v| v.id == id).unwrap();
+                approaches.insert(vehicle.approach);
+                routes.insert(vehicle.route);
+            }
+            expire_all_cooldowns(&mut spawn);
+        }
+
+        assert_eq!(
+            approaches.len(),
+            Cardinal::ALL.len(),
+            "all approaches appear"
+        );
+        assert_eq!(routes.len(), Route::ALL.len(), "all routes appear");
+    }
+
+    fn expire_cooldown_for_vehicle(spawn: &mut SpawnSystem, id: VehicleId) {
+        let approach = spawn
+            .vehicles()
+            .iter()
+            .find(|v| v.id == id)
+            .expect("vehicle exists")
+            .approach;
+        expire_cooldown(spawn, approach);
+    }
+
+    fn expire_all_cooldowns(spawn: &mut SpawnSystem) {
+        for approach in Cardinal::ALL {
+            expire_cooldown(spawn, approach);
+        }
     }
 
     #[test]
