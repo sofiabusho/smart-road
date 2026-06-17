@@ -17,6 +17,25 @@ pub enum VehicleState {
     Done,
 }
 
+/// Discrete speed levels assigned at spawn (B03; SDS §13.3; REQ-7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VelocityLevel {
+    Fast,
+    Cruise,
+    Yield,
+}
+
+impl VelocityLevel {
+    /// Concrete speed in world units per second, derived from the default cruise speed.
+    pub fn speed(self) -> f32 {
+        match self {
+            VelocityLevel::Fast => crate::config::DEFAULT_SPAWN_VELOCITY * 1.4,
+            VelocityLevel::Cruise => crate::config::DEFAULT_SPAWN_VELOCITY * 1.0,
+            VelocityLevel::Yield => crate::config::DEFAULT_SPAWN_VELOCITY * 0.5,
+        }
+    }
+}
+
 /// Vehicle simulation state (physics integration in B01).
 #[derive(Debug)]
 pub struct Vehicle {
@@ -36,6 +55,11 @@ pub struct Vehicle {
 
 /// Create a vehicle at a lane spawn point (IF-1: B allocates id; A04 factory stub).
 pub fn spawn_vehicle(id: VehicleId, lane: &LaneInfo, velocity: f32) -> Vehicle {
+    let level = match id.0 % 3 {
+        0 => VelocityLevel::Fast,
+        1 => VelocityLevel::Cruise,
+        _ => VelocityLevel::Yield,
+    };
     Vehicle {
         id,
         lane_id: lane.id,
@@ -44,7 +68,7 @@ pub fn spawn_vehicle(id: VehicleId, lane: &LaneInfo, velocity: f32) -> Vehicle {
         position: lane.spawn_point,
         heading_rad: lane.approach.travel_heading(),
         velocity,
-        commanded_velocity: velocity,
+        commanded_velocity: level.speed(),
         state: VehicleState::Approaching,
         path_index: 0,
         distance_in_crossing: 0.0,
@@ -66,6 +90,9 @@ pub fn integrate_physics(vehicle: &mut Vehicle, dt: f32) {
     if vehicle.state == VehicleState::Done {
         return;
     }
+    // commanded_velocity is the authoritative speed source (B03); copy into velocity so
+    // both integrate_physics and advance_along_path use the commanded level each frame.
+    vehicle.velocity = vehicle.commanded_velocity;
 
     let dx = vehicle.velocity * dt * vehicle.heading_rad.cos();
     let dy = vehicle.velocity * dt * vehicle.heading_rad.sin();
@@ -127,8 +154,97 @@ pub fn advance_along_path(vehicle: &mut Vehicle, model: &IntersectionModel, dt: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::intersection::{attach_paths, IntersectionModel};
+    use crate::intersection::{attach_paths, Cardinal, IntersectionModel, LaneId, Route};
+    use crate::spawn::{SpawnRequest, SpawnSystem};
     use std::collections::HashMap;
+
+    fn make_vehicle(id_val: u64, commanded_velocity: f32) -> Vehicle {
+        Vehicle {
+            id: VehicleId(id_val),
+            lane_id: LaneId(0),
+            route: Route::Straight,
+            approach: crate::intersection::Cardinal::South,
+            position: Vec2 { x: 0.0, y: 0.0 },
+            heading_rad: 0.0,
+            velocity: 0.0,
+            commanded_velocity,
+            state: VehicleState::Approaching,
+            path_index: 0,
+            distance_in_crossing: 0.0,
+            time_in_crossing: 0.0,
+        }
+    }
+
+    #[test]
+    fn b03_spawned_vehicles_have_three_distinct_commanded_velocities() {
+        // Test (a) — B03: spawn 3 vehicles through the real SpawnSystem path on different
+        // approaches (no cooldown conflict), then assert the set of distinct commanded_velocity
+        // values has size >= 3.  A test that only checks the constants array is distinct would
+        // pass trivially without exercising the spawn path at all.
+        let model = IntersectionModel::new();
+        let mut spawn = SpawnSystem::new();
+
+        spawn.try_spawn(SpawnRequest::new(Cardinal::South, Route::Straight), &model);
+        spawn.try_spawn(SpawnRequest::new(Cardinal::North, Route::Straight), &model);
+        spawn.try_spawn(SpawnRequest::new(Cardinal::West, Route::Straight), &model);
+
+        assert_eq!(spawn.vehicles().len(), 3, "all 3 spawns must succeed");
+
+        // Collect distinct commanded_velocity values (f32 bits for HashSet membership).
+        let distinct: std::collections::HashSet<u32> = spawn
+            .vehicles()
+            .iter()
+            .map(|v| v.commanded_velocity.to_bits())
+            .collect();
+
+        assert!(
+            distinct.len() >= 3,
+            "expected >= 3 distinct commanded_velocity values but got {}: {:?}",
+            distinct.len(),
+            spawn
+                .vehicles()
+                .iter()
+                .map(|v| v.commanded_velocity)
+                .collect::<Vec<_>>(),
+        );
+
+        // Also confirm the values match the published VelocityLevel speeds.
+        let expected: std::collections::HashSet<u32> = [
+            VelocityLevel::Fast.speed(),
+            VelocityLevel::Cruise.speed(),
+            VelocityLevel::Yield.speed(),
+        ]
+        .iter()
+        .map(|f| f.to_bits())
+        .collect();
+
+        assert_eq!(
+            distinct, expected,
+            "commanded_velocity values must match VelocityLevel::speed() for all three levels",
+        );
+    }
+
+    #[test]
+    fn faster_commanded_velocity_drives_strictly_greater_distance() {
+        // Test (b) — B03: proves commanded_velocity is wired into motion, not just stored.
+        // The reconcile line `velocity = commanded_velocity` in integrate_physics must fire,
+        // causing the Fast vehicle to cover more ground than the Yield vehicle in equal time.
+        let mut yield_v = make_vehicle(1, VelocityLevel::Yield.speed());
+        let mut fast_v = make_vehicle(2, VelocityLevel::Fast.speed());
+
+        let dt = 1.0_f32;
+        integrate_physics(&mut yield_v, dt);
+        integrate_physics(&mut fast_v, dt);
+
+        // heading_rad = 0.0 → motion is purely along +x
+        assert!(
+            fast_v.position.x > yield_v.position.x,
+            "Fast vehicle (x={}) must travel farther than Yield vehicle (x={}) for equal dt; \
+             commanded_velocity is not wired into motion if this fails",
+            fast_v.position.x,
+            yield_v.position.x,
+        );
+    }
 
     #[test]
     fn integrate_physics_does_not_accumulate_crossing_metrics_when_approaching() {
