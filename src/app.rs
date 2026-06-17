@@ -23,7 +23,6 @@ pub struct App {
     running: bool,
     intersection: IntersectionModel,
     spawn: SpawnSystem,
-    #[allow(dead_code)]
     smart: SmartController,
     #[allow(dead_code)]
     stats: Stats,
@@ -112,8 +111,13 @@ impl App {
         }
 
         self.spawn.update(&self.intersection, FIXED_TIMESTEP_SECS);
+        self.smart.update(
+            self.spawn.vehicles_mut(),
+            &self.intersection,
+            FIXED_TIMESTEP_SECS,
+        );
 
-        let _ = (&mut self.smart, &mut self.stats, self.spawn.vehicles());
+        let _ = &mut self.stats;
     }
 
     fn draw(&self, canvas: &mut WindowCanvas, road_assets: &RoadAssets<'_>) -> Result<(), String> {
