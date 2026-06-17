@@ -27,6 +27,7 @@ pub fn approach_for_arrow(key: Keycode) -> Option<Cardinal> {
 #[derive(Debug, Default)]
 pub struct InputState {
     events: Vec<InputEvent>,
+    random_stream_active: bool,
 }
 
 impl InputState {
@@ -46,7 +47,10 @@ impl InputState {
         }
 
         match key {
-            Keycode::R => self.events.push(InputEvent::RandomStream(true)),
+            Keycode::R => {
+                self.random_stream_active = true;
+                self.events.push(InputEvent::RandomStream(true));
+            }
             Keycode::Escape => self.events.push(InputEvent::Exit),
             _ => {}
         }
@@ -54,8 +58,14 @@ impl InputState {
 
     pub fn on_key_up(&mut self, keycode: Option<Keycode>) {
         if keycode == Some(Keycode::R) {
+            self.random_stream_active = false;
             self.events.push(InputEvent::RandomStream(false));
         }
+    }
+
+    /// Whether `R` is currently held (continuous random spawn while true).
+    pub fn random_stream_active(&self) -> bool {
+        self.random_stream_active
     }
 
     pub fn drain_events(&mut self) -> impl Iterator<Item = InputEvent> + '_ {
@@ -85,6 +95,26 @@ mod tests {
     #[test]
     fn arrow_left_spawns_east_approach() {
         assert_eq!(approach_for_arrow(Keycode::Left), Some(Cardinal::East));
+    }
+
+    #[test]
+    fn key_down_emits_random_stream_on_r() {
+        let mut input = InputState::new();
+        input.on_key_down(Some(Keycode::R));
+        let events: Vec<_> = input.drain_events().collect();
+        assert_eq!(events, vec![InputEvent::RandomStream(true)]);
+        assert!(input.random_stream_active());
+    }
+
+    #[test]
+    fn key_up_clears_random_stream() {
+        let mut input = InputState::new();
+        input.on_key_down(Some(Keycode::R));
+        let _: Vec<_> = input.drain_events().collect();
+        input.on_key_up(Some(Keycode::R));
+        let events: Vec<_> = input.drain_events().collect();
+        assert_eq!(events, vec![InputEvent::RandomStream(false)]);
+        assert!(!input.random_stream_active());
     }
 
     #[test]
