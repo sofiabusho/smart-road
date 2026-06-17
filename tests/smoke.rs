@@ -65,3 +65,25 @@ fn crate_smoke_arrow_spawn_pipeline() {
         assert_eq!(events, vec![InputEvent::SpawnCardinal(expected_approach)]);
     }
 }
+
+#[test]
+fn crate_smoke_random_spawn_pipeline() {
+    let model = IntersectionModel::new();
+    let mut spawn = SpawnSystem::new();
+    let mut input = InputState::new();
+
+    input.on_key_down(Some(Keycode::R));
+    let events: Vec<_> = input.drain_events().collect();
+    assert_eq!(events, vec![InputEvent::RandomStream(true)]);
+    assert!(input.random_stream_active());
+
+    if input.random_stream_active() {
+        assert!(spawn.spawn_random(&model).is_some());
+    }
+    assert_eq!(spawn.vehicles().len(), 1);
+
+    input.on_key_up(Some(Keycode::R));
+    let events: Vec<_> = input.drain_events().collect();
+    assert_eq!(events, vec![InputEvent::RandomStream(false)]);
+    assert!(!input.random_stream_active());
+}
