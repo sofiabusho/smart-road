@@ -17,7 +17,7 @@ Collect before reviewing:
 | Input | How to get it |
 |-------|----------------|
 | PR number or branch | User provides `gh pr view <N>`, branch name, or local branch |
-| Ticket ID | Branch name (`feat/A04-arrow-spawn`), PR title, or `docs/pr-messages/{ID}-*-pr.md` |
+| Ticket ID | Branch name (e.g. `andy/A04-arrow-spawn`), PR title, or `docs/pr-messages/{ID}-*-pr.md` |
 | PR message artifact | `docs/pr-messages/{TicketID}-*-pr.md` (required for ticket PRs) |
 | Diff scope | `git diff main...HEAD` or `gh pr diff <N>` |
 
@@ -63,7 +63,7 @@ cargo run   # confirm window launches; note visual observations
 
 ### 3.1 Ticket alignment
 
-- [ ] Branch name matches one ticket (`feat/A##-*`, `feat/B##-*`, `feat/C##-*`, or `fix/A##-*`).
+- [ ] Ticket ID is identifiable from branch, PR title, or `docs/pr-messages/` artifact.
 - [ ] Changes implement **only** that ticket's scope — no unrelated refactors or drive-by fixes.
 - [ ] Cross-track deps (🔗 in tracker) are ✅ before this ticket could legitimately merge.
 - [ ] `docs/ticket-tracker.md` updated: ticket status, coverage matrices if applicable.
