@@ -8,7 +8,7 @@
 > - **A/B/C**: Parallel developer tracks (see §2)
 > - **🔗**: Cross-track dependency — external ticket must be ✅ first
 
-Last refreshed: 2026-06-17 (A01–A06, B01, B02 ✅)
+Last refreshed: 2026-06-17 (A01–A06, B01, B02, B03 ✅; DEF-01 logged)
 
 ---
 
@@ -107,7 +107,7 @@ Execution order:
 |----|--------|--------|------|------|-----------|-------------------|-------|
 | B01 | ✅ | **Vehicle physics**: position along path, v=d/t fields | M | A04 🔗 | REQ-5 | Unit tests; AUD-26 (with C06) | B |
 | B02 | ✅ | **Route adherence**: lane-locked polylines on `IntersectionModel` | M | B01, A03 🔗 | REQ-2, REQ-6 · AUD-28 | AUD-28 | B |
-| B03 | ⬜ | **Velocity levels**: ≥3 distinct speeds | S | B01 | REQ-7 · AUD-31 | AUD-31 | B |
+| B03 | ✅ | **Velocity levels**: ≥3 distinct speeds | S | B01 | REQ-7 · AUD-31 | AUD-31 | B |
 | B04 | ⬜ | **Safe distance**: follow logic, positive constant | M | B01 | REQ-8 · AUD-29, AUD-30 | AUD-29, AUD-30 | B |
 | B05 | ⬜ | **Acceleration / deceleration** *(bonus)* | M | B01 | REQ-B3 · AUD-B3 | AUD-B3 | B |
 
@@ -345,6 +345,16 @@ No circular dependencies.
 1. *(blocked)* — read SDS §13; prep `smart.rs` / `stats.rs` interfaces
 2. **C01** — after **B02** ✅
 3. **C05** — after **C01** ✅ (can overlap with C02)
+
+---
+
+## Known Defects
+
+> These are pre-existing bugs discovered during implementation, not yet fixed. Each must be resolved before **Gate G2**.
+
+| ID | Status | Description | Size | Introduced | Fixed by | Audit risk |
+|----|--------|-------------|------|------------|----------|------------|
+| DEF-01 | 🟡 | **Double-movement per frame**: `SpawnSystem::update` calls both `integrate_physics` and `advance_along_path` in the same frame tick (`src/spawn.rs` lines 180–181). Both translate `vehicle.position` by `velocity * dt` using `+=`, so vehicles move at ~2× intended speed in the live sim. `advance_along_path` was described in the B02 PR as "overrides position" but it accumulates. Discovered during B03. **Not fixed by B03.** | S | B02 | Before B04 | AUD-28 (route adherence distances), AUD-29, AUD-30 (safe distance) |
 
 ---
 
