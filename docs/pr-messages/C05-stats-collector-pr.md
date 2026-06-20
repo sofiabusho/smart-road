@@ -14,7 +14,7 @@ Implements **session statistics collection** per SDS §9 and §13.4. `StatsSessi
 - **`src/spawn.rs`**: `VehicleExit` struct; `update()` returns exits for vehicles that left after entering managed zone.
 - **`src/app.rs`**: `StatsSession` + `session_time`; records velocity samples and crossing exits each tick.
 - **`docs/SDS.md`**: §13.1 cross-track notes for C05 `app.rs` / `spawn.rs` edits.
-- **`tests/smoke.rs`**: `crate_smoke_stats_collector_pipeline` end-to-end smoke test.
+- **`tests/smoke.rs`**: `crate_smoke_stats_collector_pipeline` and `crate_smoke_session_stats_populated_before_esc_exit` end-to-end tests.
 
 ## Cross-track edits (announced per SDS §13.1)
 
