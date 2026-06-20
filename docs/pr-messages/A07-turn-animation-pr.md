@@ -24,7 +24,7 @@ Implements **turn animation** by rendering each vehicle as a rotated sprite whos
 
 - [x] `cargo test` — all unit + integration tests pass (including intersection/path and render layout tests).
 - [x] `cargo fmt --check` — clean.
-- [x] `cargo clippy -- -D warnings` — clean.
+- [ ] `cargo clippy -- -D warnings` — **not run in this session**; expected to stay clean given localized render changes, but should be re-run in CI/local dev per A02.
 
 ### Manual Audit (against `docs/audit.md`)
 
