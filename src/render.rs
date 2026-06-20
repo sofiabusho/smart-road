@@ -37,8 +37,10 @@ impl<'tex> RoadAssets<'tex> {
 
         // A07: create simple per-approach vehicle sprites that we can rotate with SDL.
         // These are small colored rectangles stored as textures and rotated in `draw_frame`.
-        let vehicle_south = create_vehicle_texture(creator, vehicle_color(Cardinal::South))?;
-        let vehicle_north = create_vehicle_texture(creator, vehicle_color(Cardinal::North))?;
+        let vehicle_south =
+            create_vehicle_texture(creator, vehicle_color(Cardinal::South))?;
+        let vehicle_north =
+            create_vehicle_texture(creator, vehicle_color(Cardinal::North))?;
         let vehicle_west = create_vehicle_texture(creator, vehicle_color(Cardinal::West))?;
         let vehicle_east = create_vehicle_texture(creator, vehicle_color(Cardinal::East))?;
 
