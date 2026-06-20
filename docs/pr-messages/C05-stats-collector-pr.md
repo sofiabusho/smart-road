@@ -34,10 +34,11 @@ Implements **session statistics collection** per SDS §9 and §13.4. `StatsSessi
 
 ### Automated Checks
 
-- [x] `cargo test` — 55 unit + 7 smoke = 62 passed
+- [x] `cargo test` — 55 unit + 8 smoke = 63 passed
 - [x] `cargo clippy -- -D warnings` — passes
 - [x] `cargo fmt --check` — passes
-- [x] `cargo build` — succeeds (SDL2 configured)
+- [x] `cargo build` / `cargo run` — succeeds (SDL2 configured)
+- [x] **Manual (Esc)**: Spawn vehicles → Esc closes sim (no window yet); stats collected in `StatsSession` — verified by `crate_smoke_session_stats_populated_before_esc_exit`; interim `eprintln!` on Esc dumps stats to stderr until C06
 
 ### Manual Audit (against `docs/audit.md`)
 
