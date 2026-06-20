@@ -92,7 +92,7 @@ Execution order:
 | A04 | ✅ | **Arrow-key spawn**: four cardinal approaches, `SpawnRequest` API | M | A03 | REQ-12–REQ-15 · AUD-3–AUD-6 | AUD-3–AUD-6 | A |
 | A05 | ✅ | **Spawn anti-spam**: per-direction cooldown | S | A04 | REQ-18 · AUD-27 | AUD-27 | A |
 | A06 | ✅ | **`R` random spawn**: continuous random lane/route | S | A04 | REQ-16 · AUD-7 | AUD-7 | A |
-| A07 | ⬜ | **Turn animation**: sprite rotation along path tangent | M | A04, B02 🔗 | REQ-11 | Visual check; path alignment with AUD-28 | A |
+| A07 | 🟢 | **Turn animation**: sprite rotation along path tangent | M | A04, B02 🔗 | REQ-11 | Visual check; path alignment with AUD-28 | A |
 | A08 | ⬜ | **Custom assets** *(bonus)* | M | A03 | REQ-B1 · AUD-B2 | AUD-B2 | A |
 
 **Intra-track chain**: A01 → A03 → A04 → A05 / A06; A07 after B02 delivers path tangents.

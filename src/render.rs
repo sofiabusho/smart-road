@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use sdl2::pixels::Color;
+use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::rect::Rect;
 use sdl2::render::{Canvas, Texture, TextureCreator};
 use sdl2::surface::Surface;
@@ -20,6 +20,10 @@ pub struct RoadAssets<'tex> {
     approach_ns: Texture<'tex>,
     approach_ew: Texture<'tex>,
     intersection_core: Texture<'tex>,
+    vehicle_south: Texture<'tex>,
+    vehicle_north: Texture<'tex>,
+    vehicle_west: Texture<'tex>,
+    vehicle_east: Texture<'tex>,
     road_width: u32,
     ns_arm_length: u32,
     ew_arm_length: u32,
@@ -31,6 +35,13 @@ impl<'tex> RoadAssets<'tex> {
         let approach_ew = load_texture(creator, "approach_ew.bmp")?;
         let intersection_core = load_texture(creator, "intersection_core.bmp")?;
 
+        // A07: create simple per-approach vehicle sprites that we can rotate with SDL.
+        // These are small colored rectangles stored as textures and rotated in `draw_frame`.
+        let vehicle_south = create_vehicle_texture(creator, vehicle_color(Cardinal::South))?;
+        let vehicle_north = create_vehicle_texture(creator, vehicle_color(Cardinal::North))?;
+        let vehicle_west = create_vehicle_texture(creator, vehicle_color(Cardinal::West))?;
+        let vehicle_east = create_vehicle_texture(creator, vehicle_color(Cardinal::East))?;
+
         let road_width = approach_ns.query().width;
         let ns_arm_length = approach_ns.query().height;
         let ew_arm_length = approach_ew.query().width;
@@ -39,6 +50,10 @@ impl<'tex> RoadAssets<'tex> {
             approach_ns,
             approach_ew,
             intersection_core,
+            vehicle_south,
+            vehicle_north,
+            vehicle_west,
+            vehicle_east,
             road_width,
             ns_arm_length,
             ew_arm_length,
@@ -56,6 +71,24 @@ fn load_texture<'tex>(
     let texture = creator
         .create_texture_from_surface(&surface)
         .map_err(|e| format!("failed to create texture from {}: {e}", path.display()))?;
+    Ok(texture)
+}
+
+/// Create a solid-colored vehicle sprite texture that we can rotate.
+fn create_vehicle_texture<'tex>(
+    creator: &'tex TextureCreator<WindowContext>,
+    color: Color,
+) -> Result<Texture<'tex>, String> {
+    let width = VEHICLE_LENGTH.round() as u32;
+    let height = VEHICLE_WIDTH.round() as u32;
+    let mut surface = Surface::new(width, height, PixelFormatEnum::RGBA8888)
+        .map_err(|e| format!("failed to create vehicle surface: {e}"))?;
+    surface
+        .fill_rect(None, color)
+        .map_err(|e| format!("failed to fill vehicle surface: {e}"))?;
+    let texture = creator
+        .create_texture_from_surface(&surface)
+        .map_err(|e| format!("failed to create vehicle texture: {e}"))?;
     Ok(texture)
 }
 
@@ -109,8 +142,37 @@ pub fn draw_frame(
 ) -> Result<(), String> {
     draw_intersection(canvas, intersection, assets)?;
     for snapshot in vehicles {
-        draw_vehicle(canvas, snapshot)?;
+        draw_vehicle_sprite(canvas, assets, snapshot)?;
     }
+    Ok(())
+}
+
+/// Draw a single vehicle sprite rotated to match its path tangent (A07).
+fn draw_vehicle_sprite(
+    canvas: &mut Canvas<Window>,
+    assets: &RoadAssets<'_>,
+    snapshot: &VehicleRenderSnapshot,
+) -> Result<(), String> {
+    let (w, h) = vehicle_dimensions_from_heading(snapshot.heading_rad);
+    let half_w = w / 2;
+    let half_h = h / 2;
+    let cx = snapshot.position.x.round() as i32;
+    let cy = snapshot.position.y.round() as i32;
+
+    // Choose a pre-colored sprite based on the spawning approach to preserve A04 visuals.
+    let texture = match snapshot.approach {
+        Cardinal::South => &assets.vehicle_south,
+        Cardinal::North => &assets.vehicle_north,
+        Cardinal::West => &assets.vehicle_west,
+        Cardinal::East => &assets.vehicle_east,
+    };
+
+    let dst = Rect::new(cx - half_w, cy - half_h, w as u32, h as u32);
+    let angle_degrees = snapshot.heading_rad.to_degrees() as f64;
+
+    canvas
+        .copy_ex(texture, None, dst, angle_degrees, None, false, false)
+        .map_err(|e| format!("draw vehicle sprite: {e}"))?;
     Ok(())
 }
 
