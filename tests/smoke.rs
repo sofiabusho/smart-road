@@ -188,3 +188,73 @@ fn crate_smoke_stats_collector_pipeline() {
     assert!(stats.stats.max_velocity > 0.0);
     assert!(stats.stats.max_crossing_time > 0.0);
 }
+
+#[test]
+fn crate_smoke_session_stats_populated_before_esc_exit() {
+    use std::thread;
+    use std::time::Duration;
+
+    use smart_road::config::SPAWN_COOLDOWN_MS;
+    use smart_road::input::{InputEvent, InputState};
+
+    let model = IntersectionModel::new();
+    let mut spawn = SpawnSystem::new();
+    let mut smart = SmartController::new();
+    let mut stats = StatsSession::new();
+    let mut input = InputState::new();
+    let mut session_time = 0.0_f32;
+    let mut running = true;
+
+    input.on_key_down(Some(Keycode::Up));
+    for event in input.drain_events() {
+        if let InputEvent::SpawnCardinal(approach) = event {
+            spawn.spawn_on_approach(approach, &model);
+        }
+    }
+
+    thread::sleep(Duration::from_millis(SPAWN_COOLDOWN_MS + 10));
+    input.on_key_down(Some(Keycode::Up));
+    for event in input.drain_events() {
+        if let InputEvent::SpawnCardinal(approach) = event {
+            spawn.spawn_on_approach(approach, &model);
+        }
+    }
+
+    while running {
+        for event in input.drain_events() {
+            match event {
+                InputEvent::SpawnCardinal(approach) => {
+                    spawn.spawn_on_approach(approach, &model);
+                }
+                InputEvent::Exit => running = false,
+                _ => {}
+            }
+        }
+
+        session_time += FIXED_TIMESTEP_SECS;
+        let exited = spawn.update(&model, FIXED_TIMESTEP_SECS);
+        smart.update(spawn.vehicles_mut(), &model, FIXED_TIMESTEP_SECS);
+        stats.observe_vehicles(spawn.vehicles(), session_time);
+        for exit in exited {
+            stats.record_exit(exit.id, exit.time_in_crossing);
+        }
+
+        if stats.stats.vehicles_passed >= 1 {
+            input.on_key_down(Some(Keycode::Escape));
+        }
+
+        if session_time > 30.0 {
+            break;
+        }
+    }
+
+    assert!(
+        stats.stats.vehicles_passed >= 1,
+        "at least one vehicle should complete crossing before Esc"
+    );
+    assert!(stats.stats.max_velocity > 0.0);
+    assert!(stats.stats.min_velocity < f32::MAX);
+    assert!(stats.stats.max_crossing_time > 0.0);
+    assert!(stats.stats.min_crossing_time < f32::MAX);
+    assert_eq!(stats.stats.max_vehicles_passed, stats.stats.vehicles_passed);
+}

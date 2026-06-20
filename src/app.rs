@@ -102,6 +102,23 @@ impl App {
                 InputEvent::RandomStream(_) => {}
                 InputEvent::Exit => {
                     // C06 replaces this with end_session + stats window.
+                    eprintln!(
+                        "[smart-road] session stats (C06 will display): passed={} max_v={:.1} min_v={:.1} max_t={:.2}s min_t={:.2}s close_calls={}",
+                        self.stats.stats.vehicles_passed,
+                        self.stats.stats.max_velocity,
+                        if self.stats.stats.min_velocity == f32::MAX {
+                            0.0
+                        } else {
+                            self.stats.stats.min_velocity
+                        },
+                        self.stats.stats.max_crossing_time,
+                        if self.stats.stats.min_crossing_time == f32::MAX {
+                            0.0
+                        } else {
+                            self.stats.stats.min_crossing_time
+                        },
+                        self.stats.stats.close_calls,
+                    );
                     self.running = false;
                 }
             }
