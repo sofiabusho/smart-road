@@ -12,7 +12,7 @@ use crate::intersection::IntersectionModel;
 use crate::render::{self, RoadAssets};
 use crate::smart::SmartController;
 use crate::spawn::SpawnSystem;
-use crate::stats::Stats;
+use crate::stats::StatsSession;
 use crate::vehicle::snapshot_for_render;
 
 type WindowCanvas = Canvas<Window>;
@@ -24,9 +24,9 @@ pub struct App {
     intersection: IntersectionModel,
     spawn: SpawnSystem,
     smart: SmartController,
-    #[allow(dead_code)]
-    stats: Stats,
+    stats: StatsSession,
     input: InputState,
+    session_time: f32,
 }
 
 impl App {
@@ -58,8 +58,9 @@ impl App {
             intersection: IntersectionModel::new(),
             spawn: SpawnSystem::new(),
             smart: SmartController::new(),
-            stats: Stats::new(),
+            stats: StatsSession::new(),
             input: InputState::new(),
+            session_time: 0.0,
         };
 
         while app.running {
@@ -110,14 +111,19 @@ impl App {
             self.spawn.spawn_random(&self.intersection);
         }
 
-        self.spawn.update(&self.intersection, FIXED_TIMESTEP_SECS);
+        self.session_time += FIXED_TIMESTEP_SECS;
+
+        let exited = self.spawn.update(&self.intersection, FIXED_TIMESTEP_SECS);
         self.smart.update(
             self.spawn.vehicles_mut(),
             &self.intersection,
             FIXED_TIMESTEP_SECS,
         );
-
-        let _ = &mut self.stats;
+        self.stats
+            .observe_vehicles(self.spawn.vehicles(), self.session_time);
+        for exit in exited {
+            self.stats.record_exit(exit.id, exit.time_in_crossing);
+        }
     }
 
     fn draw(&self, canvas: &mut WindowCanvas, road_assets: &RoadAssets<'_>) -> Result<(), String> {

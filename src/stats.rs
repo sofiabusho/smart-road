@@ -1,14 +1,255 @@
 //! Simulation statistics collection (C05+).
 
+use std::collections::{HashMap, HashSet};
+
+use crate::vehicle::VehicleId;
+
 /// Session metrics displayed on exit (C05/C06).
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Stats {
     pub vehicles_passed: u32,
+    pub max_vehicles_passed: u32,
+    pub max_velocity: f32,
+    pub min_velocity: f32,
+    pub max_crossing_time: f32,
+    pub min_crossing_time: f32,
     pub close_calls: u32,
+}
+
+impl Default for Stats {
+    fn default() -> Self {
+        Self {
+            vehicles_passed: 0,
+            max_vehicles_passed: 0,
+            max_velocity: 0.0,
+            min_velocity: f32::MAX,
+            max_crossing_time: 0.0,
+            min_crossing_time: f32::MAX,
+            close_calls: 0,
+        }
+    }
 }
 
 impl Stats {
     pub fn new() -> Self {
         Self::default()
+    }
+}
+
+/// Events fed into the stats collector from the simulation loop.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StatsEvent {
+    VehicleManaged {
+        id: VehicleId,
+        t: f32,
+    },
+    VehicleExited {
+        id: VehicleId,
+        crossing_time: f32,
+        peak_velocity: f32,
+    },
+    CloseCall {
+        ids: (VehicleId, VehicleId),
+    },
+    VelocitySample {
+        id: VehicleId,
+        v: f32,
+    },
+}
+
+/// Apply a single stats event (SDS §13.4).
+pub fn apply_event(stats: &mut Stats, event: StatsEvent) {
+    match event {
+        StatsEvent::VehicleManaged { .. } => {}
+        StatsEvent::VehicleExited {
+            crossing_time,
+            peak_velocity,
+            ..
+        } => {
+            stats.vehicles_passed += 1;
+            stats.max_vehicles_passed = stats.max_vehicles_passed.max(stats.vehicles_passed);
+            update_velocity_bounds(stats, peak_velocity);
+            update_crossing_time_bounds(stats, crossing_time);
+        }
+        StatsEvent::CloseCall { .. } => {
+            stats.close_calls += 1;
+        }
+        StatsEvent::VelocitySample { v, .. } => {
+            update_velocity_bounds(stats, v);
+        }
+    }
+}
+
+fn update_velocity_bounds(stats: &mut Stats, velocity: f32) {
+    if velocity <= 0.0 {
+        return;
+    }
+    stats.max_velocity = stats.max_velocity.max(velocity);
+    stats.min_velocity = stats.min_velocity.min(velocity);
+}
+
+fn update_crossing_time_bounds(stats: &mut Stats, crossing_time: f32) {
+    if crossing_time <= 0.0 {
+        return;
+    }
+    stats.max_crossing_time = stats.max_crossing_time.max(crossing_time);
+    stats.min_crossing_time = stats.min_crossing_time.min(crossing_time);
+}
+
+/// Tracks per-vehicle peaks and emits stats events from the game loop.
+#[derive(Debug, Default)]
+pub struct StatsSession {
+    pub stats: Stats,
+    peak_velocity: HashMap<VehicleId, f32>,
+    managed_ids: HashSet<VehicleId>,
+}
+
+impl StatsSession {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sample active vehicles each frame for velocity and managed detection.
+    pub fn observe_vehicles(&mut self, vehicles: &[crate::vehicle::Vehicle], session_time: f32) {
+        use crate::vehicle::VehicleState;
+
+        for vehicle in vehicles {
+            if vehicle.state == VehicleState::Done {
+                continue;
+            }
+
+            apply_event(
+                &mut self.stats,
+                StatsEvent::VelocitySample {
+                    id: vehicle.id,
+                    v: vehicle.velocity,
+                },
+            );
+
+            let peak = self.peak_velocity.entry(vehicle.id).or_insert(0.0);
+            if vehicle.velocity > *peak {
+                *peak = vehicle.velocity;
+            }
+
+            if vehicle.state == VehicleState::Managed && self.managed_ids.insert(vehicle.id) {
+                apply_event(
+                    &mut self.stats,
+                    StatsEvent::VehicleManaged {
+                        id: vehicle.id,
+                        t: session_time,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Record a vehicle that left the canvas after entering the managed zone.
+    pub fn record_exit(&mut self, id: VehicleId, crossing_time: f32) {
+        let peak_velocity = self.peak_velocity.remove(&id).unwrap_or(0.0);
+        apply_event(
+            &mut self.stats,
+            StatsEvent::VehicleExited {
+                id,
+                crossing_time,
+                peak_velocity,
+            },
+        );
+        self.managed_ids.remove(&id);
+    }
+
+    /// Record a close call (REQ-26); wired from B04 `detect_close_call` in a later integration step.
+    pub fn record_close_call(&mut self, a: VehicleId, b: VehicleId) {
+        apply_event(&mut self.stats, StatsEvent::CloseCall { ids: (a, b) });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vehicle_exit_updates_passed_count_and_crossing_bounds() {
+        let mut stats = Stats::new();
+        apply_event(
+            &mut stats,
+            StatsEvent::VehicleExited {
+                id: VehicleId(1),
+                crossing_time: 2.5,
+                peak_velocity: 100.0,
+            },
+        );
+        apply_event(
+            &mut stats,
+            StatsEvent::VehicleExited {
+                id: VehicleId(2),
+                crossing_time: 1.0,
+                peak_velocity: 80.0,
+            },
+        );
+
+        assert_eq!(stats.vehicles_passed, 2);
+        assert_eq!(stats.max_vehicles_passed, 2);
+        assert_eq!(stats.max_crossing_time, 2.5);
+        assert_eq!(stats.min_crossing_time, 1.0);
+        assert_eq!(stats.max_velocity, 100.0);
+        assert_eq!(stats.min_velocity, 80.0);
+    }
+
+    #[test]
+    fn velocity_samples_track_min_and_max() {
+        let mut stats = Stats::new();
+        for v in [120.0, 60.0, 90.0] {
+            apply_event(
+                &mut stats,
+                StatsEvent::VelocitySample {
+                    id: VehicleId(1),
+                    v,
+                },
+            );
+        }
+
+        assert_eq!(stats.max_velocity, 120.0);
+        assert_eq!(stats.min_velocity, 60.0);
+    }
+
+    #[test]
+    fn close_call_increments_counter() {
+        let mut stats = Stats::new();
+        apply_event(
+            &mut stats,
+            StatsEvent::CloseCall {
+                ids: (VehicleId(1), VehicleId(2)),
+            },
+        );
+        assert_eq!(stats.close_calls, 1);
+    }
+
+    #[test]
+    fn stats_session_records_managed_once_and_exit() {
+        use crate::intersection::{Cardinal, Route};
+        use crate::vehicle::{Vehicle, VehicleState};
+
+        let mut session = StatsSession::new();
+        let vehicle = Vehicle {
+            id: VehicleId(7),
+            lane_id: crate::intersection::LaneId(0),
+            route: Route::Straight,
+            approach: Cardinal::South,
+            position: crate::intersection::Vec2::new(0.0, 0.0),
+            heading_rad: 0.0,
+            velocity: 100.0,
+            commanded_velocity: 100.0,
+            state: VehicleState::Managed,
+            path_index: 0,
+            distance_in_crossing: 0.0,
+            time_in_crossing: 1.5,
+        };
+
+        session.observe_vehicles(std::slice::from_ref(&vehicle), 0.0);
+        session.observe_vehicles(std::slice::from_ref(&vehicle), 0.1);
+        session.record_exit(vehicle.id, vehicle.time_in_crossing);
+
+        assert_eq!(session.stats.vehicles_passed, 1);
+        assert_eq!(session.stats.max_velocity, 100.0);
     }
 }

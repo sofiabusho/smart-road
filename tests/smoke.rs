@@ -7,7 +7,7 @@ use smart_road::input::{approach_for_arrow, InputEvent, InputState};
 use smart_road::intersection::{lane_id, Cardinal, IntersectionModel, Route, Vec2};
 use smart_road::smart::SmartController;
 use smart_road::spawn::{SpawnRequest, SpawnSystem};
-use smart_road::stats::Stats;
+use smart_road::stats::StatsSession;
 use smart_road::vehicle::VehicleState;
 #[test]
 fn crate_smoke_config_constants() {
@@ -22,7 +22,7 @@ fn crate_smoke_module_defaults_construct() {
     let _ = IntersectionModel::new();
     let _ = SpawnSystem::new();
     let _ = SmartController::new();
-    let _ = Stats::new();
+    let _ = StatsSession::new();
 }
 #[test]
 fn crate_smoke_intersection_lane_registry() {
@@ -134,7 +134,7 @@ fn crate_smoke_same_approach_follower_slows_behind_stopped_leader() {
 
     let mut saw_slowdown = false;
     for _ in 0..400 {
-        spawn.update(&model, FIXED_TIMESTEP_SECS);
+        let _ = spawn.update(&model, FIXED_TIMESTEP_SECS);
 
         let leader = &spawn.vehicles()[0];
         let follower = &spawn.vehicles()[1];
@@ -154,4 +154,37 @@ fn crate_smoke_same_approach_follower_slows_behind_stopped_leader() {
         saw_slowdown,
         "follower should slow behind stopped leader on same lane"
     );
+}
+
+#[test]
+fn crate_smoke_stats_collector_pipeline() {
+    let model = IntersectionModel::new();
+    let mut spawn = SpawnSystem::new();
+    let mut smart = SmartController::new();
+    let mut stats = StatsSession::new();
+    let mut session_time = 0.0_f32;
+
+    spawn
+        .try_spawn(SpawnRequest::new(Cardinal::South, Route::Straight), &model)
+        .expect("spawn succeeds");
+
+    let mut recorded_exit = false;
+    for _ in 0..800 {
+        session_time += FIXED_TIMESTEP_SECS;
+        let exited = spawn.update(&model, FIXED_TIMESTEP_SECS);
+        smart.update(spawn.vehicles_mut(), &model, FIXED_TIMESTEP_SECS);
+        stats.observe_vehicles(spawn.vehicles(), session_time);
+        for exit in exited {
+            stats.record_exit(exit.id, exit.time_in_crossing);
+            recorded_exit = true;
+        }
+        if recorded_exit {
+            break;
+        }
+    }
+
+    assert!(recorded_exit, "vehicle should exit after crossing");
+    assert_eq!(stats.stats.vehicles_passed, 1);
+    assert!(stats.stats.max_velocity > 0.0);
+    assert!(stats.stats.max_crossing_time > 0.0);
 }

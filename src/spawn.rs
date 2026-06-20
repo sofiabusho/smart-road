@@ -99,6 +99,13 @@ impl SpawnRequest {
     }
 }
 
+/// Crossing data captured when a vehicle leaves the canvas (C05).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VehicleExit {
+    pub id: VehicleId,
+    pub time_in_crossing: f32,
+}
+
 /// Spawn pipeline: keyboard requests → vehicles (A04).
 #[derive(Debug)]
 pub struct SpawnSystem {
@@ -166,8 +173,9 @@ impl SpawnSystem {
     }
 
     /// Advance movement along lane paths and remove vehicles that left the canvas.
-    pub fn update(&mut self, model: &IntersectionModel, dt: f32) {
+    pub fn update(&mut self, model: &IntersectionModel, dt: f32) -> Vec<VehicleExit> {
         crate::vehicle::enforce_follow_distance(&mut self.vehicles, crate::config::SAFE_DISTANCE);
+        let mut exited = Vec::new();
 
         for vehicle in &mut self.vehicles {
             if vehicle.state == VehicleState::Done {
@@ -175,10 +183,17 @@ impl SpawnSystem {
             }
             crate::vehicle::advance_along_path(vehicle, model, dt);
             if is_off_screen(vehicle.position) {
+                if vehicle.state != VehicleState::Approaching {
+                    exited.push(VehicleExit {
+                        id: vehicle.id,
+                        time_in_crossing: vehicle.time_in_crossing,
+                    });
+                }
                 vehicle.state = VehicleState::Done;
             }
         }
         self.vehicles.retain(|v| v.state != VehicleState::Done);
+        exited
     }
 
     fn route_for_approach(&self, approach: Cardinal) -> Route {
