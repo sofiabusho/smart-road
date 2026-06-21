@@ -11,7 +11,7 @@ Implements **same-lane safe-distance follow logic** per SDS §13.3 and REQ-8/REQ
 ## Key Changes
 
 - **`src/config.rs`**: `SAFE_DISTANCE` (40 world units, ≥ `VEHICLE_LENGTH`).
-- **`src/vehicle.rs`**: `enforce_follow_distance()`, `detect_close_call()`, longitudinal gap helper; crossing metrics now accumulate inside `advance_along_path`.
+- **`src/vehicle.rs`**: `enforce_follow_distance()`, `detect_close_call()`, longitudinal gap helper; `nominal_velocity` field for spawn-speed restoration; crossing metrics accumulate in `advance_along_path` including at path terminal.
 - **`src/spawn.rs`**: Call `enforce_follow_distance` each tick; remove duplicate `integrate_physics` call (DEF-01 fix).
 - **`tests/smoke.rs`**: `crate_smoke_same_approach_follower_slows_behind_stopped_leader` — full spawn pipeline manual scenario.
 
@@ -19,20 +19,21 @@ Implements **same-lane safe-distance follow logic** per SDS §13.3 and REQ-8/REQ
 
 | File | Owner | B04 change |
 |------|-------|------------|
+| `src/config.rs` | A | Add `SAFE_DISTANCE` constant (40 world units) |
 | `src/spawn.rs` | A | Invoke `enforce_follow_distance` before `advance_along_path` in `SpawnSystem::update` (same pattern as existing B02 path call) |
 
 ## Technical Decisions
 
 - **40 unit safe distance**: PRD OQ-2 — strictly positive and ≥ one vehicle length (36).
 - **Approach / exiting only**: `enforce_follow_distance` skips `Managed` followers (smart zone defers to C02); leaders on any non-`Done` state still affect followers.
-- **Proportional slowdown**: When gap &lt; `SAFE_DISTANCE`, cap `commanded_velocity` by leader speed and gap ratio; hard stop when gap ≤ 10% of safe distance.
+- **Proportional slowdown**: When gap &lt; `SAFE_DISTANCE`, cap `commanded_velocity` by leader speed and gap ratio (using `nominal_velocity` as cruise baseline to avoid frame-over-frame ratcheting); hard stop when gap ≤ 10% of safe distance. Restore `nominal_velocity` when gap clears.
 - **DEF-01 fix**: `integrate_physics` remains for unit tests; live loop uses `advance_along_path` only so vehicles move once per frame.
 
 ## Verification Results
 
 ### Automated Checks
 
-- [x] `cargo test` — 56 unit + 7 smoke = 63 passed
+- [x] `cargo test` — 59 unit + 7 smoke = 66 passed
 - [x] `cargo clippy -- -D warnings` — passes
 - [x] `cargo fmt --check` — passes
 - [x] `cargo build` / `cargo run` — succeeds (SDL2 configured; window launches)
@@ -52,9 +53,9 @@ Implements **same-lane safe-distance follow logic** per SDS §13.3 and REQ-8/REQ
 
 - **Test output**:
   ```text
-  running 56 tests (unit) ... ok
+  running 59 tests (unit) ... ok
   running 7 tests (smoke) ... ok
-  test result: ok. 63 passed; 0 failed
+  test result: ok. 66 passed; 0 failed
   ```
 - **Lint output**: `cargo clippy -- -D warnings` clean.
 

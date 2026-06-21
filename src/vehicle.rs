@@ -47,6 +47,8 @@ pub struct Vehicle {
     pub heading_rad: f32,
     pub velocity: f32,
     pub commanded_velocity: f32,
+    /// Spawn-assigned speed level (B03); restored when follow-distance gap clears (B04).
+    pub nominal_velocity: f32,
     pub state: VehicleState,
     pub path_index: usize,
     pub distance_in_crossing: f32,
@@ -60,6 +62,7 @@ pub fn spawn_vehicle(id: VehicleId, lane: &LaneInfo, _velocity: f32) -> Vehicle 
         1 => VelocityLevel::Cruise,
         _ => VelocityLevel::Yield,
     };
+    let speed = level.speed();
     Vehicle {
         id,
         lane_id: lane.id,
@@ -67,8 +70,9 @@ pub fn spawn_vehicle(id: VehicleId, lane: &LaneInfo, _velocity: f32) -> Vehicle 
         approach: lane.approach,
         position: lane.spawn_point,
         heading_rad: lane.approach.travel_heading(),
-        velocity: level.speed(),
-        commanded_velocity: level.speed(),
+        velocity: speed,
+        commanded_velocity: speed,
+        nominal_velocity: speed,
         state: VehicleState::Approaching,
         path_index: 0,
         distance_in_crossing: 0.0,
@@ -146,7 +150,7 @@ pub fn enforce_follow_distance(vehicles: &mut [Vehicle], safe_distance: f32) {
             continue;
         }
 
-        let cruise = vehicles[i].commanded_velocity;
+        let nominal = vehicles[i].nominal_velocity;
         let mut gap_ahead = f32::INFINITY;
         let mut leader_velocity = 0.0_f32;
 
@@ -167,6 +171,8 @@ pub fn enforce_follow_distance(vehicles: &mut [Vehicle], safe_distance: f32) {
         }
 
         if gap_ahead >= safe_distance {
+            vehicles[i].commanded_velocity = nominal;
+            vehicles[i].velocity = nominal;
             continue;
         }
 
@@ -174,7 +180,7 @@ pub fn enforce_follow_distance(vehicles: &mut [Vehicle], safe_distance: f32) {
         let target = if gap_ahead <= safe_distance * 0.1 {
             0.0
         } else {
-            leader_velocity.min(cruise * scale)
+            leader_velocity.min(nominal * scale)
         };
 
         vehicles[i].commanded_velocity = target;
@@ -182,7 +188,10 @@ pub fn enforce_follow_distance(vehicles: &mut [Vehicle], safe_distance: f32) {
     }
 }
 
-/// True when two vehicles on the same lane are closer than the configured safe distance.
+/// True when two same-lane vehicles are within safe distance (REQ-26 scaffolding for C05).
+///
+/// Uses center-to-center Euclidean distance. [`enforce_follow_distance`] uses
+/// longitudinal gap along heading — C05 should prefer longitudinal checks for close calls.
 pub fn detect_close_call(a: &Vehicle, b: &Vehicle, safe_distance: f32) -> bool {
     if a.lane_id != b.lane_id || a.id == b.id {
         return false;
@@ -201,13 +210,23 @@ pub fn detect_close_call(a: &Vehicle, b: &Vehicle, safe_distance: f32) -> bool {
 pub fn advance_along_path(vehicle: &mut Vehicle, model: &IntersectionModel, dt: f32) {
     vehicle.velocity = vehicle.commanded_velocity;
     let start = vehicle.position;
+    let track_crossing =
+        vehicle.state == VehicleState::Managed || vehicle.state == VehicleState::Exiting;
 
     let path = match model.lane(vehicle.lane_id) {
         Some(lane) if !lane.path.is_empty() => &lane.path,
-        _ => return,
+        _ => {
+            if track_crossing {
+                vehicle.time_in_crossing += dt;
+            }
+            return;
+        }
     };
 
     if vehicle.path_index >= path.len() - 1 {
+        if track_crossing {
+            vehicle.time_in_crossing += dt;
+        }
         return;
     }
 
@@ -270,6 +289,7 @@ mod tests {
             heading_rad: 0.0,
             velocity: 0.0,
             commanded_velocity,
+            nominal_velocity: commanded_velocity,
             state: VehicleState::Approaching,
             path_index: 0,
             distance_in_crossing: 0.0,
@@ -359,6 +379,7 @@ mod tests {
             heading_rad: 0.0,
             velocity: 50.0,
             commanded_velocity: 50.0,
+            nominal_velocity: 50.0,
             state: VehicleState::Approaching,
             path_index: 0,
             distance_in_crossing: 0.0,
@@ -392,6 +413,7 @@ mod tests {
             heading_rad: 0.0,
             velocity: 50.0,
             commanded_velocity: 50.0,
+            nominal_velocity: 50.0,
             state: VehicleState::Managed,
             path_index: 0,
             distance_in_crossing: 0.0,
@@ -421,6 +443,7 @@ mod tests {
             heading_rad: 0.0,
             velocity: 50.0,
             commanded_velocity: 50.0,
+            nominal_velocity: 50.0,
             state: VehicleState::Exiting,
             path_index: 0,
             distance_in_crossing: 0.0,
@@ -456,6 +479,7 @@ mod tests {
             heading_rad: 0.0,
             velocity: 50.0,
             commanded_velocity: 50.0,
+            nominal_velocity: 50.0,
             state: VehicleState::Approaching,
             path_index: 0,
             distance_in_crossing: 0.0,
@@ -573,6 +597,111 @@ mod tests {
         assert_eq!(
             vehicles[1].commanded_velocity, initial_speed,
             "Managed vehicles defer to smart controller, not B04 follow logic"
+        );
+    }
+
+    #[test]
+    fn enforce_follow_distance_steady_follow_behind_moving_leader_no_ratcheting() {
+        let model = IntersectionModel::new();
+        let lid = lane_id(Cardinal::South, Route::Straight);
+        let lane = model.lane(lid).unwrap();
+        let nominal = VelocityLevel::Fast.speed();
+        let leader_speed = 60.0_f32;
+        let gap = crate::config::SAFE_DISTANCE * 0.5;
+
+        let mut leader = spawn_vehicle(VehicleId(1), lane, leader_speed);
+        leader.position = Vec2::new(lane.spawn_point.x, 500.0);
+        leader.velocity = leader_speed;
+        leader.commanded_velocity = leader_speed;
+
+        let mut follower = spawn_vehicle(VehicleId(2), lane, nominal);
+        follower.position = Vec2::new(lane.spawn_point.x, leader.position.y + gap);
+        follower.velocity = nominal;
+        follower.commanded_velocity = nominal;
+
+        let mut vehicles = vec![leader, follower];
+        enforce_follow_distance(&mut vehicles, crate::config::SAFE_DISTANCE);
+        let steady = vehicles[1].commanded_velocity;
+
+        assert!(
+            steady > 0.0 && steady < nominal,
+            "follower should slow but not stop behind moving leader (steady={steady})"
+        );
+
+        for _ in 0..100 {
+            enforce_follow_distance(&mut vehicles, crate::config::SAFE_DISTANCE);
+            assert_eq!(
+                vehicles[1].commanded_velocity, steady,
+                "velocity must not ratchet frame-over-frame (steady={steady}, now={})",
+                vehicles[1].commanded_velocity
+            );
+        }
+    }
+
+    #[test]
+    fn enforce_follow_distance_restores_nominal_when_gap_safe() {
+        let model = IntersectionModel::new();
+        let lid = lane_id(Cardinal::South, Route::Straight);
+        let lane = model.lane(lid).unwrap();
+        let nominal = VelocityLevel::Fast.speed();
+
+        let mut leader = spawn_vehicle(VehicleId(1), lane, nominal);
+        leader.position = Vec2::new(lane.spawn_point.x, 500.0);
+
+        let mut follower = spawn_vehicle(VehicleId(2), lane, nominal);
+        follower.nominal_velocity = nominal;
+        follower.position = Vec2::new(
+            lane.spawn_point.x,
+            leader.position.y + crate::config::SAFE_DISTANCE * 2.0,
+        );
+        follower.commanded_velocity = 10.0;
+        follower.velocity = 10.0;
+
+        let mut vehicles = vec![leader, follower];
+        enforce_follow_distance(&mut vehicles, crate::config::SAFE_DISTANCE);
+
+        assert_eq!(
+            vehicles[1].commanded_velocity, nominal,
+            "follower should restore nominal speed when gap is safe"
+        );
+        assert_eq!(vehicles[1].velocity, nominal);
+    }
+
+    #[test]
+    fn advance_along_path_accumulates_time_at_path_terminal() {
+        let mut model = IntersectionModel::new();
+        let lane_id_val = model.lanes[0].id;
+        let paths = HashMap::from([(
+            lane_id_val,
+            vec![Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0)],
+        )]);
+        attach_paths(&mut model, paths);
+
+        let mut vehicle = Vehicle {
+            id: VehicleId(1),
+            lane_id: lane_id_val,
+            route: model.lanes[0].route,
+            approach: model.lanes[0].approach,
+            position: Vec2::new(100.0, 0.0),
+            heading_rad: 0.0,
+            velocity: 0.0,
+            commanded_velocity: 0.0,
+            nominal_velocity: 50.0,
+            state: VehicleState::Managed,
+            path_index: 1,
+            distance_in_crossing: 0.0,
+            time_in_crossing: 0.0,
+        };
+
+        advance_along_path(&mut vehicle, &model, 0.25);
+
+        assert_eq!(
+            vehicle.time_in_crossing, 0.25,
+            "time should accumulate at path terminal for Managed vehicles"
+        );
+        assert_eq!(
+            vehicle.distance_in_crossing, 0.0,
+            "no distance moved when already at terminal waypoint"
         );
     }
 }
