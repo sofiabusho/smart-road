@@ -55,6 +55,34 @@ pub struct Vehicle {
     pub time_in_crossing: f32,
 }
 
+/// Per-vehicle acceleration and deceleration scale (REQ-B3 / AUD-B3).
+pub fn motion_profile(id: VehicleId) -> (f32, f32) {
+    match id.0 % 3 {
+        0 => (1.4, 1.2),
+        1 => (1.0, 1.0),
+        _ => (0.7, 0.6),
+    }
+}
+
+/// Ramp `velocity` toward `commanded_velocity` with bounded accel/decel (B05).
+pub fn step_velocity_toward_command(vehicle: &mut Vehicle, dt: f32) {
+    let target = vehicle.commanded_velocity;
+    let current = vehicle.velocity;
+    if (target - current).abs() < 0.01 {
+        vehicle.velocity = target;
+        return;
+    }
+
+    let (accel_scale, decel_scale) = motion_profile(vehicle.id);
+    let max_change = if target > current {
+        crate::config::BASE_ACCELERATION * accel_scale * dt
+    } else {
+        crate::config::BASE_DECELERATION * decel_scale * dt
+    };
+    let delta = (target - current).clamp(-max_change, max_change);
+    vehicle.velocity = current + delta;
+}
+
 /// Create a vehicle at a lane spawn point (IF-1: B allocates id; A04 factory stub).
 pub fn spawn_vehicle(id: VehicleId, lane: &LaneInfo, _velocity: f32) -> Vehicle {
     let level = match id.0 % 3 {
@@ -97,9 +125,8 @@ pub fn integrate_physics(vehicle: &mut Vehicle, dt: f32) {
     if vehicle.state == VehicleState::Done {
         return;
     }
-    // commanded_velocity is the authoritative speed source (B03); copy into velocity so
-    // both integrate_physics and advance_along_path use the commanded level each frame.
-    vehicle.velocity = vehicle.commanded_velocity;
+    // B05: ramp actual speed toward commanded speed before integrating motion.
+    step_velocity_toward_command(vehicle, dt);
 
     let dx = vehicle.velocity * dt * vehicle.heading_rad.cos();
     let dy = vehicle.velocity * dt * vehicle.heading_rad.sin();
@@ -172,7 +199,6 @@ pub fn enforce_follow_distance(vehicles: &mut [Vehicle], safe_distance: f32) {
 
         if gap_ahead >= safe_distance {
             vehicles[i].commanded_velocity = nominal;
-            vehicles[i].velocity = nominal;
             continue;
         }
 
@@ -184,7 +210,6 @@ pub fn enforce_follow_distance(vehicles: &mut [Vehicle], safe_distance: f32) {
         };
 
         vehicles[i].commanded_velocity = target;
-        vehicles[i].velocity = target;
     }
 }
 
@@ -208,7 +233,7 @@ pub fn detect_close_call(a: &Vehicle, b: &Vehicle, safe_distance: f32) -> bool {
 
 /// Move vehicle along its lane path polyline for this frame.
 pub fn advance_along_path(vehicle: &mut Vehicle, model: &IntersectionModel, dt: f32) {
-    vehicle.velocity = vehicle.commanded_velocity;
+    step_velocity_toward_command(vehicle, dt);
     let start = vehicle.position;
     let track_crossing =
         vehicle.state == VehicleState::Managed || vehicle.state == VehicleState::Exiting;
@@ -664,7 +689,68 @@ mod tests {
             vehicles[1].commanded_velocity, nominal,
             "follower should restore nominal speed when gap is safe"
         );
-        assert_eq!(vehicles[1].velocity, nominal);
+        let before = vehicles[1].velocity;
+        for _ in 0..120 {
+            step_velocity_toward_command(&mut vehicles[1], crate::config::FIXED_TIMESTEP_SECS);
+        }
+        assert!(
+            (vehicles[1].velocity - nominal).abs() < 1.0,
+            "velocity should ramp up to nominal after gap clears (got {})",
+            vehicles[1].velocity
+        );
+        assert!(
+            vehicles[1].velocity > before,
+            "velocity should increase gradually"
+        );
+    }
+
+    #[test]
+    fn velocity_decelerates_gradually_not_instantly() {
+        let mut vehicle = make_vehicle(1, VelocityLevel::Fast.speed());
+        vehicle.velocity = vehicle.commanded_velocity;
+        vehicle.commanded_velocity = 0.0;
+
+        let before = vehicle.velocity;
+        step_velocity_toward_command(&mut vehicle, crate::config::FIXED_TIMESTEP_SECS);
+
+        assert!(vehicle.velocity > 0.0, "one frame should not snap to zero");
+        assert!(
+            vehicle.velocity < before,
+            "velocity should decrease toward command"
+        );
+    }
+
+    #[test]
+    fn different_vehicles_use_different_deceleration_rates() {
+        let dt = crate::config::FIXED_TIMESTEP_SECS;
+        let start = VelocityLevel::Fast.speed();
+
+        let mut quicker = make_vehicle(1, start);
+        quicker.velocity = start;
+        quicker.commanded_velocity = 0.0;
+
+        let mut slower = make_vehicle(2, start);
+        slower.velocity = start;
+        slower.commanded_velocity = 0.0;
+
+        step_velocity_toward_command(&mut quicker, dt);
+        step_velocity_toward_command(&mut slower, dt);
+
+        assert!(
+            quicker.velocity < slower.velocity,
+            "VehicleId(1) should decelerate faster than VehicleId(2) (AUD-B3)"
+        );
+    }
+
+    #[test]
+    fn motion_profile_exposes_three_distinct_deceleration_scales() {
+        let scales: std::collections::HashSet<u32> = (0..12)
+            .map(|id| {
+                let (_, decel) = motion_profile(VehicleId(id));
+                (decel * 1000.0) as u32
+            })
+            .collect();
+        assert_eq!(scales.len(), 3, "expected three distinct decel profiles");
     }
 
     #[test]
