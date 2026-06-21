@@ -326,10 +326,10 @@ Three developers work tracks **A**, **B**, and **C** per `docs/ticket-tracker.md
 
 | Module / file | Owner track | Notes |
 |---------------|-------------|-------|
-| `main.rs`, `app.rs` | **A** (A01) | **C01** may wire `SmartController::update()` in the tick loop; **C07** adds `App::end_session()` — cross-track edits require SDS update + PR note |
+| `main.rs`, `app.rs` | **A** (A01) | **C01** may wire `SmartController::update()` in the tick loop; **C05** may wire `StatsSession` in the tick loop; **C07** adds `App::end_session()` — cross-track edits require SDS update + PR note |
 | `config.rs` | **A** (A01) | B/C propose constants via ticket PR; A merges tunables |
 | `intersection.rs` | **A** (A03) + **B** (B02) | A owns topology + render-facing layout; B owns `path: Vec<Vec2>` per lane — separate impl blocks or `lane_paths` submodule |
-| `spawn.rs`, `input.rs` | **A** | **C01** may add `SpawnSystem::vehicles_mut()`; **B02**/**B04** call `advance_along_path` / `enforce_follow_distance` from `SpawnSystem::update` |
+| `spawn.rs`, `input.rs` | **A** | **C01** may add `SpawnSystem::vehicles_mut()`; **B02**/**B04** call `advance_along_path` / `enforce_follow_distance` from `SpawnSystem::update`; **C05** may extend `update` to return `VehicleExit` events |
 | `render.rs` | **A** (A03, A07) | Reads `VehicleRenderSnapshot` only — no mutation |
 | `vehicle.rs` | **B** (B01) | **A04 stub** (IF-1): `spawn_vehicle`, `approach` / `position` / `heading_rad` fields; B01 owns physics and `VehicleId` allocation |
 | `smart.rs` | **C** | |

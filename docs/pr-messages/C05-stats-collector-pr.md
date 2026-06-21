@@ -1,0 +1,65 @@
+---
+title: "feat(C05): stats collector for session metrics"
+---
+
+# PR Implementation Report: C05
+
+## Summary
+
+Implements **session statistics collection** per SDS §9 and §13.4. `StatsSession` observes vehicles each frame for velocity samples and managed-zone entry; `SpawnSystem::update` returns `VehicleExit` events when vehicles leave the canvas after crossing. Wired into `app.rs` after smart detection. Satisfies collector side of **REQ-20–REQ-26** (display deferred to **C06**).
+
+## Key Changes
+
+- **`src/stats.rs`**: `Stats` fields, `StatsEvent`, `apply_event()`, `StatsSession` with `observe_vehicles` / `record_exit` / `record_close_call`; 4 unit tests.
+- **`src/spawn.rs`**: `VehicleExit` struct; `update()` returns exits for vehicles that left after entering managed zone; unit tests for REQ-23 Approaching exclusion; `is_off_screen` uses inclusive margin boundary (path endpoints at ±64).
+- **`src/app.rs`**: `StatsSession` + `session_time`; records velocity samples and crossing exits each tick; wires B04 `detect_close_call` with per-pair dedup.
+- **`docs/SDS.md`**: §13.1 cross-track notes for C05 `app.rs` / `spawn.rs` edits.
+- **`tests/smoke.rs`**: `crate_smoke_stats_collector_pipeline` and `crate_smoke_session_stats_populated_before_esc_exit` end-to-end tests.
+
+## Cross-track edits (announced per SDS §13.1)
+
+| File | Owner | C05 change |
+|------|-------|------------|
+| `src/app.rs` | A | Wire `StatsSession::observe_vehicles` and `record_exit` in tick loop |
+| `src/spawn.rs` | A | `SpawnSystem::update` returns `Vec<VehicleExit>` for stats on vehicle removal |
+
+## Technical Decisions
+
+- **Exit only after managed zone**: Vehicles that leave before smart detection (`Approaching`) are not counted as passed (REQ-23 crossing timer).
+- **Peak velocity per vehicle**: Tracked in `StatsSession` and applied on exit alongside live velocity samples.
+- **Close calls**: `record_close_call` deduplicates pairs per session; `app.rs` wires B04 `detect_close_call` each tick after smart detection.
+- **C05 scope only**: No Esc stats window (C06); stats accumulate in memory during session.
+
+## Verification Results
+
+### Automated Checks
+
+- [x] `cargo test` — 66 unit + 9 smoke = 75 passed
+- [x] `cargo clippy -- -D warnings` — passes
+- [x] `cargo fmt --check` — passes
+- [x] `cargo build` / `cargo run` — succeeds (SDL2 configured)
+- [x] **Manual (Esc)**: Spawn vehicles → Esc closes sim (no window yet); stats collected in `StatsSession` — verified by `crate_smoke_session_stats_populated_before_esc_exit`; interim `eprintln!` on Esc dumps stats to stderr until C06
+
+### Manual Audit (against `docs/audit.md`)
+
+- [ ] **AUD-20–AUD-24**: Deferred to **C06** (stats window display) — collector fields populated in `StatsSession.stats`.
+- [x] **REQ-23** (collector): `time_in_crossing` from vehicle at exit after C01 detection path.
+
+### Requirements Traceability
+
+- [x] **REQ-20**: `vehicles_passed` / `max_vehicles_passed` updated on `VehicleExited` events.
+- [x] **REQ-21 / REQ-22**: `max_velocity` / `min_velocity` from per-frame samples and exit peaks.
+- [x] **REQ-23**: Crossing time taken from `vehicle.time_in_crossing` at canvas exit (post-detection).
+- [x] **REQ-24 / REQ-25**: `max_crossing_time` / `min_crossing_time` bounds on exit events.
+- [x] **REQ-26**: `close_calls` counter + `record_close_call` API (auto-detect when B04 available).
+
+## Artifacts
+
+- **Test output**: `cargo test` — all unit + smoke tests pass.
+- **Lint output**: `cargo clippy -- -D warnings` clean.
+
+---
+
+## Next Steps
+
+- **C06** — Stats window on Esc: display all `Stats` fields (AUD-18–AUD-25); clarify `max_vehicles_passed` vs concurrent peak if both shown.

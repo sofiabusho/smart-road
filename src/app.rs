@@ -6,14 +6,17 @@ use sdl2::render::Canvas;
 use sdl2::video::Window;
 use sdl2::Sdl;
 
-use crate::config::{FIXED_TIMESTEP_SECS, WINDOW_HEIGHT, WINDOW_TITLE, WINDOW_WIDTH};
+use crate::config::{
+    FIXED_TIMESTEP_SECS, SAFE_DISTANCE, WINDOW_HEIGHT, WINDOW_TITLE, WINDOW_WIDTH,
+};
 use crate::input::{InputEvent, InputState};
 use crate::intersection::IntersectionModel;
 use crate::render::{self, RoadAssets};
 use crate::smart::SmartController;
 use crate::spawn::SpawnSystem;
-use crate::stats::Stats;
+use crate::stats::StatsSession;
 use crate::vehicle::snapshot_for_render;
+use crate::vehicle::{detect_close_call, VehicleState};
 
 type WindowCanvas = Canvas<Window>;
 
@@ -24,9 +27,9 @@ pub struct App {
     intersection: IntersectionModel,
     spawn: SpawnSystem,
     smart: SmartController,
-    #[allow(dead_code)]
-    stats: Stats,
+    stats: StatsSession,
     input: InputState,
+    session_time: f32,
 }
 
 impl App {
@@ -58,8 +61,9 @@ impl App {
             intersection: IntersectionModel::new(),
             spawn: SpawnSystem::new(),
             smart: SmartController::new(),
-            stats: Stats::new(),
+            stats: StatsSession::new(),
             input: InputState::new(),
+            session_time: 0.0,
         };
 
         while app.running {
@@ -101,6 +105,23 @@ impl App {
                 InputEvent::RandomStream(_) => {}
                 InputEvent::Exit => {
                     // C06 replaces this with end_session + stats window.
+                    eprintln!(
+                        "[smart-road] session stats (C06 will display): passed={} max_v={:.1} min_v={:.1} max_t={:.2}s min_t={:.2}s close_calls={}",
+                        self.stats.stats.vehicles_passed,
+                        self.stats.stats.max_velocity,
+                        if self.stats.stats.min_velocity == f32::MAX {
+                            0.0
+                        } else {
+                            self.stats.stats.min_velocity
+                        },
+                        self.stats.stats.max_crossing_time,
+                        if self.stats.stats.min_crossing_time == f32::MAX {
+                            0.0
+                        } else {
+                            self.stats.stats.min_crossing_time
+                        },
+                        self.stats.stats.close_calls,
+                    );
                     self.running = false;
                 }
             }
@@ -110,14 +131,37 @@ impl App {
             self.spawn.spawn_random(&self.intersection);
         }
 
-        self.spawn.update(&self.intersection, FIXED_TIMESTEP_SECS);
+        self.session_time += FIXED_TIMESTEP_SECS;
+
+        let exited = self.spawn.update(&self.intersection, FIXED_TIMESTEP_SECS);
         self.smart.update(
             self.spawn.vehicles_mut(),
             &self.intersection,
             FIXED_TIMESTEP_SECS,
         );
+        self.stats
+            .observe_vehicles(self.spawn.vehicles(), self.session_time);
+        self.record_close_calls();
+        for exit in exited {
+            self.stats.record_exit(exit.id, exit.time_in_crossing);
+        }
+    }
 
-        let _ = &mut self.stats;
+    fn record_close_calls(&mut self) {
+        let vehicles = self.spawn.vehicles();
+        for i in 0..vehicles.len() {
+            if vehicles[i].state == VehicleState::Done {
+                continue;
+            }
+            for j in (i + 1)..vehicles.len() {
+                if vehicles[j].state == VehicleState::Done {
+                    continue;
+                }
+                if detect_close_call(&vehicles[i], &vehicles[j], SAFE_DISTANCE) {
+                    self.stats.record_close_call(vehicles[i].id, vehicles[j].id);
+                }
+            }
+        }
     }
 
     fn draw(&self, canvas: &mut WindowCanvas, road_assets: &RoadAssets<'_>) -> Result<(), String> {

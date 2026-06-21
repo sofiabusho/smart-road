@@ -8,7 +8,7 @@
 > - **A/B/C**: Parallel developer tracks (see §2)
 > - **🔗**: Cross-track dependency — external ticket must be ✅ first
 
-Last refreshed: 2026-06-17 (A01–A06, B01–B04, C01 ✅; DEF-01 fixed in B04)
+Last refreshed: 2026-06-17 (A01–A06, B01–B04, C01, C05 ✅)
 
 ---
 
@@ -125,7 +125,7 @@ Execution order:
 | C02 | ⬜ | **Smart scheduler**: velocity/time coordination | L | C01, B03 🔗, B04 🔗 | REQ-3, REQ-9 · AUD-8–AUD-14 | AUD-8–AUD-14 | C |
 | C03 | ⬜ | **Yield on conflict**: slowdown avoidance | M | C02 | REQ-9 · AUD-15 | AUD-15 | C |
 | C04 | ⬜ | **Sustained traffic**: R ≥1 min, congestion cap | M | C02, A06 🔗 | REQ-3 · AUD-16, AUD-17 | AUD-16, AUD-17 | C |
-| C05 | ⬜ | **Stats collector**: min/max velocity, crossing times, close calls | M | C01 | REQ-20–REQ-26 | AUD-20–AUD-24 | C |
+| C05 | ✅ | **Stats collector**: min/max velocity, crossing times, close calls | M | C01 | REQ-20–REQ-26 | AUD-20–AUD-24 | C |
 | C06 | ⬜ | **Stats window on Esc**: display all fields | M | C05 | REQ-17, REQ-19 · AUD-18, AUD-19 | AUD-18–AUD-24, AUD-25 | C |
 | C07 | ⬜ | **Audit dry-run**: full AUD-1–AUD-31 pass, README runbook | S | C06, A07 🔗, C03 🔗, C04 🔗 | NFR-5 · AUD-1–AUD-31 | Gate G2 | C |
 | C08 | ⬜ | **Extra statistics** *(bonus)* | S | C05 | REQ-B2 · AUD-B1 | AUD-B1 | C |
@@ -189,8 +189,8 @@ No circular dependencies.
 | After B02 ✅ | **C01** | B02 🔗 |
 | After C01 + B03 + B04 ✅ | **C02** | — |
 | After C02 ✅ | **C03** ∥ **C04** (C04 also needs A06 ✅) | A06 🔗 for C04 |
-| After C01 ✅ | **C05** (can start in parallel with C02) | — |
-| After C05 ✅ | **C06** | — |
+| **Now** | **C06** (stats window) | — |
+| After C01 ✅ | ~~**C05**~~ ✅ (can overlap with C02) | — |
 | After C06 + A07 + C03 + C04 ✅ | **C07** | A07 🔗, C03, C04 |
 | After C05 ✅ | **C08** *(bonus)* | — |
 
@@ -340,8 +340,8 @@ No circular dependencies.
 
 ### Dev C
 
-1. **C02** — smart scheduler (B03 ✅, B04 ✅, C01 ✅)
-2. **C05** — stats collector (can overlap with C02)
+1. **C06** — stats window on Esc (C05 ✅)
+2. **C02** — smart scheduler (B03 ✅, B04 ✅, C01 ✅)
 
 ---
 

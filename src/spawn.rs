@@ -99,6 +99,13 @@ impl SpawnRequest {
     }
 }
 
+/// Crossing data captured when a vehicle leaves the canvas (C05).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VehicleExit {
+    pub id: VehicleId,
+    pub time_in_crossing: f32,
+}
+
 /// Spawn pipeline: keyboard requests → vehicles (A04).
 #[derive(Debug)]
 pub struct SpawnSystem {
@@ -166,8 +173,9 @@ impl SpawnSystem {
     }
 
     /// Advance movement along lane paths and remove vehicles that left the canvas.
-    pub fn update(&mut self, model: &IntersectionModel, dt: f32) {
+    pub fn update(&mut self, model: &IntersectionModel, dt: f32) -> Vec<VehicleExit> {
         crate::vehicle::enforce_follow_distance(&mut self.vehicles, crate::config::SAFE_DISTANCE);
+        let mut exited = Vec::new();
 
         for vehicle in &mut self.vehicles {
             if vehicle.state == VehicleState::Done {
@@ -175,10 +183,17 @@ impl SpawnSystem {
             }
             crate::vehicle::advance_along_path(vehicle, model, dt);
             if is_off_screen(vehicle.position) {
+                if vehicle.state != VehicleState::Approaching {
+                    exited.push(VehicleExit {
+                        id: vehicle.id,
+                        time_in_crossing: vehicle.time_in_crossing,
+                    });
+                }
                 vehicle.state = VehicleState::Done;
             }
         }
         self.vehicles.retain(|v| v.state != VehicleState::Done);
+        exited
     }
 
     fn route_for_approach(&self, approach: Cardinal) -> Route {
@@ -198,19 +213,59 @@ impl Default for SpawnSystem {
     }
 }
 
-/// True when the vehicle center is well outside the window bounds.
+/// True when the vehicle center is at or beyond the window margin.
 fn is_off_screen(position: Vec2) -> bool {
     const MARGIN: f32 = 64.0;
-    position.x < -MARGIN
-        || position.y < -MARGIN
-        || position.x > crate::config::WINDOW_WIDTH as f32 + MARGIN
-        || position.y > crate::config::WINDOW_HEIGHT as f32 + MARGIN
+    position.x <= -MARGIN
+        || position.y <= -MARGIN
+        || position.x >= crate::config::WINDOW_WIDTH as f32 + MARGIN
+        || position.y >= crate::config::WINDOW_HEIGHT as f32 + MARGIN
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::intersection::lane_id;
+
+    #[test]
+    fn update_does_not_emit_exit_for_approaching_vehicle_off_screen() {
+        let model = IntersectionModel::new();
+        let mut spawn = SpawnSystem::new();
+        spawn.try_spawn(SpawnRequest::new(Cardinal::South, Route::Straight), &model);
+
+        spawn.vehicles_mut()[0].position = Vec2::new(-200.0, -200.0);
+        assert_eq!(spawn.vehicles()[0].state, VehicleState::Approaching);
+
+        let exited = spawn.update(&model, 0.0);
+
+        assert!(
+            exited.is_empty(),
+            "vehicles that never enter the managed zone must not emit VehicleExit"
+        );
+        assert!(
+            spawn.vehicles().is_empty(),
+            "off-screen vehicle is still removed"
+        );
+    }
+
+    #[test]
+    fn update_emits_exit_for_managed_vehicle_off_screen() {
+        let model = IntersectionModel::new();
+        let mut spawn = SpawnSystem::new();
+        let id = spawn
+            .try_spawn(SpawnRequest::new(Cardinal::South, Route::Straight), &model)
+            .expect("spawn succeeds");
+
+        spawn.vehicles_mut()[0].state = VehicleState::Managed;
+        spawn.vehicles_mut()[0].time_in_crossing = 1.5;
+        spawn.vehicles_mut()[0].position = Vec2::new(-200.0, -200.0);
+
+        let exited = spawn.update(&model, 0.0);
+
+        assert_eq!(exited.len(), 1);
+        assert_eq!(exited[0].id, id);
+        assert_eq!(exited[0].time_in_crossing, 1.5);
+    }
 
     #[test]
     fn spawn_request_carries_lane_id() {
