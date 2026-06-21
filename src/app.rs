@@ -179,5 +179,7 @@ impl App {
 
 /// Capture session metrics for the post-`Esc` statistics window (SDS §13.4).
 pub fn end_session(app: &App) -> SessionSummary {
-    session_summary_from(app.stats.stats.clone())
+    let mut stats = app.stats.stats.clone();
+    stats.finalize_session(app.session_time);
+    session_summary_from(stats)
 }

@@ -16,7 +16,7 @@ pub const STATS_WINDOW_TITLE: &str = "smart-road — session statistics";
 pub const STATS_WINDOW_WIDTH: u32 = 520;
 
 /// Statistics window height in pixels.
-pub const STATS_WINDOW_HEIGHT: u32 = 360;
+pub const STATS_WINDOW_HEIGHT: u32 = 440;
 
 /// Target frames per second for the game loop.
 pub const TARGET_FPS: u32 = 60;
