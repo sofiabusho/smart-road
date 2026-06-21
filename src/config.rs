@@ -57,6 +57,10 @@ pub const VEHICLE_WIDTH: f32 = 22.0;
 /// Vehicle sprite length in world units (pixels at 1:1 scale).
 pub const VEHICLE_LENGTH: f32 = 36.0;
 
+/// Minimum center-to-center gap between vehicles on the same lane (REQ-8 / AUD-29).
+/// PRD OQ-2: strictly positive and at least one vehicle length.
+pub const SAFE_DISTANCE: f32 = 40.0;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,6 +91,15 @@ mod tests {
         );
         assert!(
             (EW_ARM_LENGTH - (INTERSECTION_CENTER_X - half - APPROACH_MARGIN)).abs() < f32::EPSILON
+        );
+    }
+
+    #[test]
+    fn safe_distance_is_positive_and_vehicle_scaled() {
+        assert!(SAFE_DISTANCE > 0.0);
+        assert!(
+            SAFE_DISTANCE >= VEHICLE_LENGTH,
+            "safe distance should be at least one vehicle length"
         );
     }
 }

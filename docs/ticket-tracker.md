@@ -8,7 +8,7 @@
 > - **A/B/C**: Parallel developer tracks (see §2)
 > - **🔗**: Cross-track dependency — external ticket must be ✅ first
 
-Last refreshed: 2026-06-17 (A01–A06, B01, B02, B03 ✅; DEF-01 logged)
+Last refreshed: 2026-06-17 (A01–A06, B01–B04, C01 ✅; DEF-01 fixed in B04)
 
 ---
 
@@ -108,7 +108,7 @@ Execution order:
 | B01 | ✅ | **Vehicle physics**: position along path, v=d/t fields | M | A04 🔗 | REQ-5 | Unit tests; AUD-26 (with C06) | B |
 | B02 | ✅ | **Route adherence**: lane-locked polylines on `IntersectionModel` | M | B01, A03 🔗 | REQ-2, REQ-6 · AUD-28 | AUD-28 | B |
 | B03 | ✅ | **Velocity levels**: ≥3 distinct speeds | S | B01 | REQ-7 · AUD-31 | AUD-31 | B |
-| B04 | ⬜ | **Safe distance**: follow logic, positive constant | M | B01 | REQ-8 · AUD-29, AUD-30 | AUD-29, AUD-30 | B |
+| B04 | ✅ | **Safe distance**: follow logic, positive constant | M | B01 | REQ-8 · AUD-29, AUD-30 | AUD-29, AUD-30 | B |
 | B05 | ⬜ | **Acceleration / deceleration** *(bonus)* | M | B01 | REQ-B3 · AUD-B3 | AUD-B3 | B |
 
 **Intra-track chain**: B01 → B02 → B03 → B04 (B03/B04 can parallel after B01 if stubs stable).
@@ -178,10 +178,8 @@ No circular dependencies.
 | When | Pick up | Blocked by |
 |------|---------|------------|
 | While waiting | Read `docs/SDS.md` §13 stubs; draft `vehicle.rs` types offline | — |
-| **Now** | **B01** | A04 ✅ |
-| After B01 ✅ + A03 ✅ | **B02** | A03 🔗 |
-| After B01 ✅ | **B03** ∥ **B04** (parallel) | — |
-| After B01 ✅ | **B05** *(bonus)* | — |
+| **Now** | **B05** *(bonus)* | — |
+| After B01 ✅ | ~~**B03** ∥ **B04**~~ ✅ | — |
 
 ### Dev C (Smart control & stats)
 
@@ -189,7 +187,7 @@ No circular dependencies.
 |------|---------|------------|
 | While waiting | Read `docs/SDS.md` §13; sketch `smart.rs` / `stats.rs` interfaces | B02 |
 | After B02 ✅ | **C01** | B02 🔗 |
-| After C01 + B03 + B04 ✅ | **C02** | B03 🔗, B04 🔗 |
+| After C01 + B03 + B04 ✅ | **C02** | — |
 | After C02 ✅ | **C03** ∥ **C04** (C04 also needs A06 ✅) | A06 🔗 for C04 |
 | After C01 ✅ | **C05** (can start in parallel with C02) | — |
 | After C05 ✅ | **C06** | — |
@@ -337,14 +335,13 @@ No circular dependencies.
 
 ### Dev B
 
-1. **B01** — vehicle physics (A04 ✅ unblocks)
-2. **B02** — after **B01** + **A03** ✅
+1. **B05** *(bonus)* — acceleration / deceleration
+2. **B01**–**B04** ✅ — physics through safe distance complete
 
 ### Dev C
 
-1. *(blocked)* — read SDS §13; prep `smart.rs` / `stats.rs` interfaces
-2. **C01** — after **B02** ✅
-3. **C05** — after **C01** ✅ (can overlap with C02)
+1. **C02** — smart scheduler (B03 ✅, B04 ✅, C01 ✅)
+2. **C05** — stats collector (can overlap with C02)
 
 ---
 
@@ -354,7 +351,7 @@ No circular dependencies.
 
 | ID | Status | Description | Size | Introduced | Fixed by | Audit risk |
 |----|--------|-------------|------|------------|----------|------------|
-| DEF-01 | 🟡 | **Double-movement per frame**: `SpawnSystem::update` calls both `integrate_physics` and `advance_along_path` in the same frame tick (`src/spawn.rs` lines 180–181). Both translate `vehicle.position` by `velocity * dt` using `+=`, so vehicles move at ~2× intended speed in the live sim. `advance_along_path` was described in the B02 PR as "overrides position" but it accumulates. Discovered during B03. **Not fixed by B03.** | S | B02 | Before B04 | AUD-28 (route adherence distances), AUD-29, AUD-30 (safe distance) |
+| DEF-01 | ✅ | **Double-movement per frame**: `SpawnSystem::update` called both `integrate_physics` and `advance_along_path` each tick, doubling travel speed. Fixed in **B04** — live sim uses `advance_along_path` only; crossing metrics accumulate inside path movement. | S | B02 | B04 | AUD-28, AUD-29, AUD-30 |
 
 ---
 

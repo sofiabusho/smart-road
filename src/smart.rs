@@ -80,6 +80,7 @@ mod tests {
             heading_rad: 0.0,
             velocity: 120.0,
             commanded_velocity: 120.0,
+            nominal_velocity: 120.0,
             state,
             path_index: 0,
             distance_in_crossing: 0.0,
