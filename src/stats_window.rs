@@ -151,7 +151,8 @@ fn draw_text(
         if let Some(glyph) = glyph_rows(ch) {
             for (row, bits) in glyph.iter().enumerate() {
                 for col in 0..8_i32 {
-                    if bits & (1 << (7 - col)) != 0 {
+                    // font8x8: LSB is the left-most pixel in each row
+                    if bits & (1 << col) != 0 {
                         let rect = Rect::new(
                             cursor_x + col * scale as i32,
                             y + row as i32 * scale as i32,
