@@ -133,8 +133,14 @@ fn crate_smoke_same_approach_follower_slows_behind_stopped_leader() {
     spawn.vehicles_mut()[1].velocity = fast_speed;
 
     let mut saw_slowdown = false;
-    for _ in 0..400 {
+    for _ in 0..300 {
         let _ = spawn.update(&model, FIXED_TIMESTEP_SECS);
+
+        assert_eq!(
+            spawn.vehicles().len(),
+            2,
+            "both vehicles must stay on canvas during follow-distance scenario"
+        );
 
         let leader = &spawn.vehicles()[0];
         let follower = &spawn.vehicles()[1];
@@ -147,6 +153,7 @@ fn crate_smoke_same_approach_follower_slows_behind_stopped_leader() {
 
         if follower.velocity < fast_speed {
             saw_slowdown = true;
+            break;
         }
     }
 

@@ -6,7 +6,9 @@ use sdl2::render::Canvas;
 use sdl2::video::Window;
 use sdl2::Sdl;
 
-use crate::config::{FIXED_TIMESTEP_SECS, WINDOW_HEIGHT, WINDOW_TITLE, WINDOW_WIDTH};
+use crate::config::{
+    FIXED_TIMESTEP_SECS, SAFE_DISTANCE, WINDOW_HEIGHT, WINDOW_TITLE, WINDOW_WIDTH,
+};
 use crate::input::{InputEvent, InputState};
 use crate::intersection::IntersectionModel;
 use crate::render::{self, RoadAssets};
@@ -14,6 +16,7 @@ use crate::smart::SmartController;
 use crate::spawn::SpawnSystem;
 use crate::stats::StatsSession;
 use crate::vehicle::snapshot_for_render;
+use crate::vehicle::{detect_close_call, VehicleState};
 
 type WindowCanvas = Canvas<Window>;
 
@@ -138,8 +141,26 @@ impl App {
         );
         self.stats
             .observe_vehicles(self.spawn.vehicles(), self.session_time);
+        self.record_close_calls();
         for exit in exited {
             self.stats.record_exit(exit.id, exit.time_in_crossing);
+        }
+    }
+
+    fn record_close_calls(&mut self) {
+        let vehicles = self.spawn.vehicles();
+        for i in 0..vehicles.len() {
+            if vehicles[i].state == VehicleState::Done {
+                continue;
+            }
+            for j in (i + 1)..vehicles.len() {
+                if vehicles[j].state == VehicleState::Done {
+                    continue;
+                }
+                if detect_close_call(&vehicles[i], &vehicles[j], SAFE_DISTANCE) {
+                    self.stats.record_close_call(vehicles[i].id, vehicles[j].id);
+                }
+            }
         }
     }
 

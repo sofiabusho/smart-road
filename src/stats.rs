@@ -8,6 +8,7 @@ use crate::vehicle::VehicleId;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stats {
     pub vehicles_passed: u32,
+    /// Cumulative vehicles that completed a crossing (equals `vehicles_passed` until concurrent-peak tracking is added in C06).
     pub max_vehicles_passed: u32,
     pub max_velocity: f32,
     pub min_velocity: f32,
@@ -60,6 +61,7 @@ pub enum StatsEvent {
 /// Apply a single stats event (SDS §13.4).
 pub fn apply_event(stats: &mut Stats, event: StatsEvent) {
     match event {
+        // Session timing metadata for C06; dedup handled in StatsSession::observe_vehicles.
         StatsEvent::VehicleManaged { .. } => {}
         StatsEvent::VehicleExited {
             crossing_time,
@@ -102,6 +104,7 @@ pub struct StatsSession {
     pub stats: Stats,
     peak_velocity: HashMap<VehicleId, f32>,
     managed_ids: HashSet<VehicleId>,
+    close_call_pairs: HashSet<(u64, u64)>,
 }
 
 impl StatsSession {
@@ -157,8 +160,12 @@ impl StatsSession {
         self.managed_ids.remove(&id);
     }
 
-    /// Record a close call (REQ-26); wired from B04 `detect_close_call` in a later integration step.
+    /// Record a close call (REQ-26); deduplicated per vehicle pair per session.
     pub fn record_close_call(&mut self, a: VehicleId, b: VehicleId) {
+        let pair = (a.0.min(b.0), a.0.max(b.0));
+        if !self.close_call_pairs.insert(pair) {
+            return;
+        }
         apply_event(&mut self.stats, StatsEvent::CloseCall { ids: (a, b) });
     }
 }
@@ -225,6 +232,14 @@ mod tests {
     }
 
     #[test]
+    fn close_call_deduplicates_vehicle_pairs() {
+        let mut session = StatsSession::new();
+        session.record_close_call(VehicleId(1), VehicleId(2));
+        session.record_close_call(VehicleId(2), VehicleId(1));
+        assert_eq!(session.stats.close_calls, 1);
+    }
+
+    #[test]
     fn stats_session_records_managed_once_and_exit() {
         use crate::intersection::{Cardinal, Route};
         use crate::vehicle::{Vehicle, VehicleState};
@@ -239,6 +254,7 @@ mod tests {
             heading_rad: 0.0,
             velocity: 100.0,
             commanded_velocity: 100.0,
+            nominal_velocity: 100.0,
             state: VehicleState::Managed,
             path_index: 0,
             distance_in_crossing: 0.0,

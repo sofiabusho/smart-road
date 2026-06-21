@@ -11,8 +11,8 @@ Implements **session statistics collection** per SDS §9 and §13.4. `StatsSessi
 ## Key Changes
 
 - **`src/stats.rs`**: `Stats` fields, `StatsEvent`, `apply_event()`, `StatsSession` with `observe_vehicles` / `record_exit` / `record_close_call`; 4 unit tests.
-- **`src/spawn.rs`**: `VehicleExit` struct; `update()` returns exits for vehicles that left after entering managed zone.
-- **`src/app.rs`**: `StatsSession` + `session_time`; records velocity samples and crossing exits each tick.
+- **`src/spawn.rs`**: `VehicleExit` struct; `update()` returns exits for vehicles that left after entering managed zone; unit tests for REQ-23 Approaching exclusion; `is_off_screen` uses inclusive margin boundary (path endpoints at ±64).
+- **`src/app.rs`**: `StatsSession` + `session_time`; records velocity samples and crossing exits each tick; wires B04 `detect_close_call` with per-pair dedup.
 - **`docs/SDS.md`**: §13.1 cross-track notes for C05 `app.rs` / `spawn.rs` edits.
 - **`tests/smoke.rs`**: `crate_smoke_stats_collector_pipeline` and `crate_smoke_session_stats_populated_before_esc_exit` end-to-end tests.
 
@@ -27,14 +27,14 @@ Implements **session statistics collection** per SDS §9 and §13.4. `StatsSessi
 
 - **Exit only after managed zone**: Vehicles that leave before smart detection (`Approaching`) are not counted as passed (REQ-23 crossing timer).
 - **Peak velocity per vehicle**: Tracked in `StatsSession` and applied on exit alongside live velocity samples.
-- **Close calls**: `record_close_call` API ready; auto-detection from B04 `detect_close_call` wired when B04 merges (C05 collector only).
+- **Close calls**: `record_close_call` deduplicates pairs per session; `app.rs` wires B04 `detect_close_call` each tick after smart detection.
 - **C05 scope only**: No Esc stats window (C06); stats accumulate in memory during session.
 
 ## Verification Results
 
 ### Automated Checks
 
-- [x] `cargo test` — 55 unit + 8 smoke = 63 passed
+- [x] `cargo test` — 66 unit + 9 smoke = 75 passed
 - [x] `cargo clippy -- -D warnings` — passes
 - [x] `cargo fmt --check` — passes
 - [x] `cargo build` / `cargo run` — succeeds (SDL2 configured)
@@ -62,5 +62,4 @@ Implements **session statistics collection** per SDS §9 and §13.4. `StatsSessi
 
 ## Next Steps
 
-- **C06** — Stats window on Esc: display all `Stats` fields (AUD-18–AUD-25).
-- **B04 integration** — Wire `detect_close_call` → `StatsSession::record_close_call` in app loop.
+- **C06** — Stats window on Esc: display all `Stats` fields (AUD-18–AUD-25); clarify `max_vehicles_passed` vs concurrent peak if both shown.
