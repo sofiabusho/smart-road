@@ -265,3 +265,43 @@ fn crate_smoke_session_stats_populated_before_esc_exit() {
     assert!(stats.stats.min_crossing_time < f32::MAX);
     assert_eq!(stats.stats.max_vehicles_passed, stats.stats.vehicles_passed);
 }
+
+#[test]
+fn crate_smoke_cross_traffic_scheduler_avoids_overlap() {
+    use smart_road::config::VEHICLE_LENGTH;
+
+    let model = IntersectionModel::new();
+    let mut spawn = SpawnSystem::new();
+    let mut smart = SmartController::new();
+
+    spawn
+        .try_spawn(SpawnRequest::new(Cardinal::South, Route::Straight), &model)
+        .expect("south spawn");
+    spawn
+        .try_spawn(SpawnRequest::new(Cardinal::East, Route::Straight), &model)
+        .expect("east spawn");
+
+    let collision_threshold = VEHICLE_LENGTH * 0.9;
+
+    for _ in 0..1200 {
+        let _ = spawn.update(&model, FIXED_TIMESTEP_SECS);
+        smart.update(spawn.vehicles_mut(), &model, FIXED_TIMESTEP_SECS);
+
+        let vehicles = spawn.vehicles();
+        for i in 0..vehicles.len() {
+            for j in (i + 1)..vehicles.len() {
+                let dx = vehicles[i].position.x - vehicles[j].position.x;
+                let dy = vehicles[i].position.y - vehicles[j].position.y;
+                let gap = (dx * dx + dy * dy).sqrt();
+                assert!(
+                    gap >= collision_threshold,
+                    "vehicles overlapped (gap={gap})"
+                );
+            }
+        }
+
+        if spawn.vehicles().is_empty() {
+            break;
+        }
+    }
+}
