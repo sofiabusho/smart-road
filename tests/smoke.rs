@@ -86,8 +86,8 @@ fn crate_smoke_spawn_smart_detection_pipeline() {
         .expect("spawn succeeds");
     assert_eq!(spawn.vehicles()[0].state, VehicleState::Approaching);
     for _ in 0..200 {
-        spawn.update(&model, FIXED_TIMESTEP_SECS);
         smart.update(spawn.vehicles_mut(), &model, FIXED_TIMESTEP_SECS);
+        let _ = spawn.update(&model, FIXED_TIMESTEP_SECS);
         if spawn.vehicles()[0].state == VehicleState::Managed {
             break;
         }
@@ -97,8 +97,15 @@ fn crate_smoke_spawn_smart_detection_pipeline() {
         VehicleState::Managed,
         "vehicle should enter Managed after spawn physics + smart detection"
     );
-    assert_eq!(spawn.vehicles()[0].time_in_crossing, 0.0);
-    assert_eq!(spawn.vehicles()[0].distance_in_crossing, 0.0);
+    assert!(
+        spawn.vehicles()[0].time_in_crossing <= FIXED_TIMESTEP_SECS,
+        "crossing timer starts at detection; at most one tick may elapse in the break frame"
+    );
+    assert!(
+        spawn.vehicles()[0].distance_in_crossing
+            <= spawn.vehicles()[0].velocity * FIXED_TIMESTEP_SECS + 0.01,
+        "at most one movement step after managed detection in the break frame"
+    );
 }
 
 #[test]
@@ -178,8 +185,8 @@ fn crate_smoke_stats_collector_pipeline() {
     let mut recorded_exit = false;
     for _ in 0..800 {
         session_time += FIXED_TIMESTEP_SECS;
-        let exited = spawn.update(&model, FIXED_TIMESTEP_SECS);
         smart.update(spawn.vehicles_mut(), &model, FIXED_TIMESTEP_SECS);
+        let exited = spawn.update(&model, FIXED_TIMESTEP_SECS);
         stats.observe_vehicles(spawn.vehicles(), session_time);
         for exit in exited {
             stats.record_exit(exit.id, exit.time_in_crossing);
@@ -239,8 +246,8 @@ fn crate_smoke_session_stats_populated_before_esc_exit() {
         }
 
         session_time += FIXED_TIMESTEP_SECS;
-        let exited = spawn.update(&model, FIXED_TIMESTEP_SECS);
         smart.update(spawn.vehicles_mut(), &model, FIXED_TIMESTEP_SECS);
+        let exited = spawn.update(&model, FIXED_TIMESTEP_SECS);
         stats.observe_vehicles(spawn.vehicles(), session_time);
         for exit in exited {
             stats.record_exit(exit.id, exit.time_in_crossing);
@@ -284,8 +291,8 @@ fn crate_smoke_cross_traffic_scheduler_avoids_overlap() {
     let collision_threshold = VEHICLE_LENGTH * 0.9;
 
     for _ in 0..1200 {
-        let _ = spawn.update(&model, FIXED_TIMESTEP_SECS);
         smart.update(spawn.vehicles_mut(), &model, FIXED_TIMESTEP_SECS);
+        let _ = spawn.update(&model, FIXED_TIMESTEP_SECS);
 
         let vehicles = spawn.vehicles();
         for i in 0..vehicles.len() {
@@ -304,4 +311,167 @@ fn crate_smoke_cross_traffic_scheduler_avoids_overlap() {
             break;
         }
     }
+}
+
+mod audit_sim {
+    use super::*;
+    use smart_road::config::{SPAWN_COOLDOWN_MS, VEHICLE_LENGTH};
+    use std::thread;
+    use std::time::Duration;
+
+    /// Run smart-road tick loop; panic on overlap; return when all vehicles exit.
+    pub fn run_until_all_exited(
+        spawn: &mut SpawnSystem,
+        model: &IntersectionModel,
+        max_frames: u32,
+    ) {
+        let mut smart = SmartController::new();
+        let collision_threshold = VEHICLE_LENGTH * 0.9;
+
+        for _ in 0..max_frames {
+            smart.update(spawn.vehicles_mut(), model, FIXED_TIMESTEP_SECS);
+            let _ = spawn.update(model, FIXED_TIMESTEP_SECS);
+
+            let vehicles = spawn.vehicles();
+            for i in 0..vehicles.len() {
+                for j in (i + 1)..vehicles.len() {
+                    let dx = vehicles[i].position.x - vehicles[j].position.x;
+                    let dy = vehicles[i].position.y - vehicles[j].position.y;
+                    let gap = (dx * dx + dy * dy).sqrt();
+                    assert!(
+                        gap >= collision_threshold,
+                        "vehicles overlapped (gap={gap}, ids {:?} vs {:?})",
+                        vehicles[i].id,
+                        vehicles[j].id
+                    );
+                }
+            }
+
+            if spawn.vehicles().is_empty() {
+                return;
+            }
+        }
+
+        panic!(
+            "vehicles still on canvas after {max_frames} frames (count={})",
+            spawn.vehicles().len()
+        );
+    }
+
+    pub fn spawn_with_cooldown(
+        spawn: &mut SpawnSystem,
+        model: &IntersectionModel,
+        approach: Cardinal,
+        route: Route,
+        count: usize,
+    ) {
+        for i in 0..count {
+            if i > 0 {
+                thread::sleep(Duration::from_millis(SPAWN_COOLDOWN_MS + 10));
+            }
+            spawn
+                .try_spawn(SpawnRequest::new(approach, route), model)
+                .expect("spawn");
+        }
+    }
+
+    pub fn spawn_on_approach_with_cooldown(
+        spawn: &mut SpawnSystem,
+        model: &IntersectionModel,
+        approach: Cardinal,
+        count: usize,
+    ) {
+        for i in 0..count {
+            if i > 0 {
+                thread::sleep(Duration::from_millis(SPAWN_COOLDOWN_MS + 10));
+            }
+            spawn
+                .spawn_on_approach(approach, model)
+                .expect("spawn on approach");
+        }
+    }
+}
+
+/// AUD-8: three vehicles same lane per approach — no collision.
+#[test]
+fn crate_smoke_audit8_three_same_lane_all_approaches() {
+    let model = IntersectionModel::new();
+
+    for approach in Cardinal::ALL {
+        let mut spawn = SpawnSystem::new();
+        audit_sim::spawn_with_cooldown(&mut spawn, &model, approach, Route::Straight, 3);
+        assert_eq!(spawn.vehicles().len(), 3);
+        audit_sim::run_until_all_exited(&mut spawn, &model, 3000);
+    }
+}
+
+/// AUD-9: one West + three East entries (rotating east routes per arrow-left).
+#[test]
+fn crate_smoke_audit9_one_west_three_east() {
+    let model = IntersectionModel::new();
+    let mut spawn = SpawnSystem::new();
+    spawn
+        .try_spawn(SpawnRequest::new(Cardinal::West, Route::Straight), &model)
+        .expect("west");
+    audit_sim::spawn_on_approach_with_cooldown(&mut spawn, &model, Cardinal::East, 3);
+    audit_sim::run_until_all_exited(&mut spawn, &model, 5000);
+}
+
+/// AUD-10: one South + three East entries.
+#[test]
+fn crate_smoke_audit10_one_south_three_east() {
+    let model = IntersectionModel::new();
+    let mut spawn = SpawnSystem::new();
+    spawn
+        .try_spawn(SpawnRequest::new(Cardinal::South, Route::Straight), &model)
+        .expect("south");
+    audit_sim::spawn_with_cooldown(&mut spawn, &model, Cardinal::East, Route::Straight, 3);
+    audit_sim::run_until_all_exited(&mut spawn, &model, 5000);
+}
+
+/// AUD-11: one South + three West entries.
+#[test]
+fn crate_smoke_audit11_one_south_three_west() {
+    let model = IntersectionModel::new();
+    let mut spawn = SpawnSystem::new();
+    spawn
+        .try_spawn(SpawnRequest::new(Cardinal::South, Route::Straight), &model)
+        .expect("south");
+    audit_sim::spawn_with_cooldown(&mut spawn, &model, Cardinal::West, Route::Straight, 3);
+    audit_sim::run_until_all_exited(&mut spawn, &model, 5000);
+}
+
+/// AUD-12: one North + three East entries.
+#[test]
+fn crate_smoke_audit12_one_north_three_east() {
+    let model = IntersectionModel::new();
+    let mut spawn = SpawnSystem::new();
+    spawn
+        .try_spawn(SpawnRequest::new(Cardinal::North, Route::Straight), &model)
+        .expect("north");
+    audit_sim::spawn_with_cooldown(&mut spawn, &model, Cardinal::East, Route::Straight, 3);
+    audit_sim::run_until_all_exited(&mut spawn, &model, 5000);
+}
+
+/// AUD-13: one North + three West entries.
+#[test]
+fn crate_smoke_audit13_one_north_three_west() {
+    let model = IntersectionModel::new();
+    let mut spawn = SpawnSystem::new();
+    spawn
+        .try_spawn(SpawnRequest::new(Cardinal::North, Route::Straight), &model)
+        .expect("north");
+    audit_sim::spawn_with_cooldown(&mut spawn, &model, Cardinal::West, Route::Straight, 3);
+    audit_sim::run_until_all_exited(&mut spawn, &model, 5000);
+}
+
+/// AUD-14: five South + two West entries.
+#[test]
+fn crate_smoke_audit14_five_south_two_west() {
+    let model = IntersectionModel::new();
+    let mut spawn = SpawnSystem::new();
+    audit_sim::spawn_with_cooldown(&mut spawn, &model, Cardinal::South, Route::Straight, 5);
+    audit_sim::spawn_with_cooldown(&mut spawn, &model, Cardinal::West, Route::Straight, 2);
+    assert_eq!(spawn.vehicles().len(), 7);
+    audit_sim::run_until_all_exited(&mut spawn, &model, 5000);
 }

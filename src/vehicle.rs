@@ -206,6 +206,47 @@ pub fn detect_close_call(a: &Vehicle, b: &Vehicle, safe_distance: f32) -> bool {
     dist_sq > 0.0 && dist_sq < safe_distance * safe_distance
 }
 
+/// Zero commanded speed and nudge apart when centers are within one vehicle length.
+pub fn clamp_velocity_for_proximity(vehicles: &mut [Vehicle]) {
+    let min_gap = crate::config::VEHICLE_LENGTH * 0.95;
+    let len = vehicles.len();
+
+    for i in 0..len {
+        if vehicles[i].state == VehicleState::Done {
+            continue;
+        }
+        for j in (i + 1)..len {
+            if vehicles[j].state == VehicleState::Done {
+                continue;
+            }
+            let dx = vehicles[i].position.x - vehicles[j].position.x;
+            let dy = vehicles[i].position.y - vehicles[j].position.y;
+            let gap = (dx * dx + dy * dy).sqrt();
+            if gap < min_gap {
+                vehicles[i].commanded_velocity = 0.0;
+                vehicles[i].velocity = 0.0;
+                vehicles[j].commanded_velocity = 0.0;
+                vehicles[j].velocity = 0.0;
+
+                if gap > f32::EPSILON {
+                    let push = (min_gap - gap) * 0.5 + 0.5;
+                    let nx = dx / gap;
+                    let ny = dy / gap;
+                    vehicles[i].position.x += nx * push;
+                    vehicles[i].position.y += ny * push;
+                    vehicles[j].position.x -= nx * push;
+                    vehicles[j].position.y -= ny * push;
+                } else {
+                    let nx = vehicles[i].heading_rad.cos();
+                    let ny = vehicles[i].heading_rad.sin();
+                    vehicles[j].position.x -= min_gap * nx;
+                    vehicles[j].position.y -= min_gap * ny;
+                }
+            }
+        }
+    }
+}
+
 /// Move vehicle along its lane path polyline for this frame.
 pub fn advance_along_path(vehicle: &mut Vehicle, model: &IntersectionModel, dt: f32) {
     vehicle.velocity = vehicle.commanded_velocity;

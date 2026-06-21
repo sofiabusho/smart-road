@@ -133,12 +133,12 @@ impl App {
 
         self.session_time += FIXED_TIMESTEP_SECS;
 
-        let exited = self.spawn.update(&self.intersection, FIXED_TIMESTEP_SECS);
         self.smart.update(
             self.spawn.vehicles_mut(),
             &self.intersection,
             FIXED_TIMESTEP_SECS,
         );
+        let exited = self.spawn.update(&self.intersection, FIXED_TIMESTEP_SECS);
         self.stats
             .observe_vehicles(self.spawn.vehicles(), self.session_time);
         self.record_close_calls();
