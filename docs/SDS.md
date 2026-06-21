@@ -265,9 +265,15 @@ pub struct Stats {
     pub max_crossing_time: f32,
     pub min_crossing_time: f32,
     pub close_calls: u32,
+    // C08 bonus (REQ-B2)
+    pub session_duration_secs: f32,
+    pub avg_crossing_time_secs: f32,
+    pub peak_concurrent_in_zone: u32,
+    pub vehicles_entered_zone: u32,
 }
 
 impl Stats {
+    pub fn finalize_session(&mut self, session_duration_secs: f32);  // C08: derive avg crossing time
     pub fn on_vehicle_managed(&mut self, v: &Vehicle);
     pub fn on_vehicle_exited(&mut self, v: &Vehicle);
     pub fn on_close_call(&mut self);
@@ -327,7 +333,7 @@ Three developers work tracks **A**, **B**, and **C** per `docs/ticket-tracker.md
 
 | Module / file | Owner track | Notes |
 |---------------|-------------|-------|
-| `main.rs`, `app.rs` | **A** (A01) | **C01** may wire `SmartController::update()` in the tick loop; **C02** reorders tick so `smart.update()` runs before `spawn.update()`; **C05** may wire `StatsSession`; **C06** adds `App::end_session()` — cross-track edits require SDS update + PR note |
+| `main.rs`, `app.rs` | **A** (A01) | **C01** may wire `SmartController::update()` in the tick loop; **C02** reorders tick so `smart.update()` runs before `spawn.update()`; **C05** may wire `StatsSession`; **C06**/**C08** extend `end_session()` (stats window + `finalize_session`) — cross-track edits require SDS update + PR note |
 | `config.rs` | **A** (A01) | B/C propose constants via ticket PR; A merges tunables |
 | `intersection.rs` | **A** (A03) + **B** (B02) | A owns topology + render-facing layout; B owns `path: Vec<Vec2>` per lane — separate impl blocks or `lane_paths` submodule |
 | `spawn.rs`, `input.rs` | **A** | **C01** may add `SpawnSystem::vehicles_mut()`; **B02**/**B04** call `advance_along_path` / `enforce_follow_distance` from `SpawnSystem::update`; **C02** adds `spawn_position_on_lane` queue offset and post-move `clamp_velocity_for_proximity`; **C05** may extend `update` to return `VehicleExit` events; **C04** adds `LANE_CAPACITY` const and cap guard in `try_spawn` |
@@ -491,7 +497,25 @@ impl SmartController {
 }
 
 // stats.rs
-pub struct Stats { /* REQ-20..26 fields */ }
+pub struct Stats {
+    /* REQ-20..26 fields */
+    pub vehicles_passed: u32,
+    pub max_vehicles_passed: u32,
+    pub max_velocity: f32,
+    pub min_velocity: f32,
+    pub max_crossing_time: f32,
+    pub min_crossing_time: f32,
+    pub close_calls: u32,
+    /* C08 bonus (REQ-B2) */
+    pub session_duration_secs: f32,
+    pub avg_crossing_time_secs: f32,
+    pub peak_concurrent_in_zone: u32,
+    pub vehicles_entered_zone: u32,
+}
+
+impl Stats {
+    pub fn finalize_session(&mut self, session_duration_secs: f32);
+}
 
 pub enum StatsEvent {
     VehicleManaged { id: VehicleId, t: f32 },
@@ -502,13 +526,15 @@ pub enum StatsEvent {
 
 pub fn apply_event(stats: &mut Stats, event: StatsEvent);
 
-// stats_window.rs (C06)
-pub struct SessionSummary { pub stats: Stats, pub vehicles_passed: u32 }
+// stats_window.rs (C06, C08 bonus section)
+pub struct SessionSummary { pub stats: Stats }
 
-pub fn show_stats_window(summary: SessionSummary) -> Result<(), String>;
+pub fn session_summary_from(stats: Stats) -> SessionSummary;
+pub fn format_stats_lines(stats: &Stats) -> Vec<String>;
+pub fn show_stats_window(sdl: &Sdl, summary: SessionSummary) -> Result<(), String>;
 
-// app.rs hook (C06, coordinated with A)
-pub fn end_session(app: &mut App) -> SessionSummary;
+// app.rs hook (C06/C08, coordinated with A)
+pub fn end_session(app: &App) -> SessionSummary;  // C08: calls Stats::finalize_session
 ```
 
 ### 13.5 Integration order (minimal merge sequence)
