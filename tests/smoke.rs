@@ -603,6 +603,7 @@ fn crate_smoke_aud16_aud17_sustained_no_overlap_no_lane_overflow() {
     use std::collections::HashMap;
 
     use smart_road::config::VEHICLE_LENGTH;
+    use smart_road::spawn::LANE_CAPACITY;
 
     let model = IntersectionModel::new();
     let mut spawn = SpawnSystem::new();
@@ -617,13 +618,24 @@ fn crate_smoke_aud16_aud17_sustained_no_overlap_no_lane_overflow() {
     let total_frames = (60.0 / FIXED_TIMESTEP_SECS) as u32;
     let collision_threshold = VEHICLE_LENGTH * 0.9;
 
+    // Tracks that at least one frame had vehicles present (proves assertions are non-vacuous).
+    let mut saw_vehicles = false;
+
     for frame in 0..total_frames {
+        // Backdate all per-direction cooldowns so spawn_random fires this frame.
+        // Wall-clock time is near-zero in tests, so without this the cooldown would
+        // always block and no random spawns would occur (the original vacuous bug).
+        spawn.force_cooldowns_expired();
         spawn.spawn_random(&model);
 
         smart.update(spawn.vehicles_mut(), &model, FIXED_TIMESTEP_SECS);
         let _ = spawn.update(&model, FIXED_TIMESTEP_SECS);
 
         let vehicles = spawn.vehicles();
+
+        if !vehicles.is_empty() {
+            saw_vehicles = true;
+        }
 
         // AUD-16: no two vehicles may overlap.
         for i in 0..vehicles.len() {
@@ -647,9 +659,50 @@ fn crate_smoke_aud16_aud17_sustained_no_overlap_no_lane_overflow() {
         }
         for (&lid, &count) in &lane_counts {
             assert!(
-                count <= 8,
-                "frame {frame}: lane {lid:?} has {count} vehicles, exceeds cap of 8"
+                count <= LANE_CAPACITY as u32,
+                "frame {frame}: lane {lid:?} has {count} vehicles, exceeds cap of {LANE_CAPACITY}"
             );
         }
     }
+
+    assert!(
+        saw_vehicles,
+        "vehicles must be present during at least one assertion frame"
+    );
+}
+
+/// AUD-17 unit: the `LANE_CAPACITY` guard blocks exactly the ninth spawn on a full lane.
+#[test]
+fn crate_unit_lane_cap_blocks_ninth_spawn() {
+    use smart_road::spawn::LANE_CAPACITY;
+
+    let model = IntersectionModel::new();
+    let mut spawn = SpawnSystem::new();
+    let req = SpawnRequest::new(Cardinal::South, Route::Straight);
+
+    // Fill the lane to capacity; expire cooldowns between each spawn so the wall-clock
+    // gate never interferes with the cap check.
+    for i in 0..LANE_CAPACITY {
+        spawn.force_cooldowns_expired();
+        assert!(
+            spawn.try_spawn(req, &model).is_some(),
+            "spawn {i} must succeed while lane holds fewer than LANE_CAPACITY vehicles"
+        );
+    }
+    assert_eq!(
+        spawn
+            .vehicles()
+            .iter()
+            .filter(|v| v.lane_id == req.lane_id)
+            .count(),
+        LANE_CAPACITY,
+        "lane must hold exactly LANE_CAPACITY vehicles after filling"
+    );
+
+    // The ninth attempt must be rejected by the cap, not the cooldown.
+    spawn.force_cooldowns_expired();
+    assert!(
+        spawn.try_spawn(req, &model).is_none(),
+        "try_spawn must return None when lane is already at LANE_CAPACITY"
+    );
 }
