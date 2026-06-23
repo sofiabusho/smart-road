@@ -15,6 +15,7 @@ use crate::config::{
 use crate::intersection::{Cardinal, IntersectionModel, Route, VehicleRenderSnapshot};
 
 const ROAD_ASSET_DIR: &str = "assets/roads";
+const VEHICLE_ASSET_DIR: &str = "assets/vehicles";
 const LANE_LABEL_INSET: f32 = 80.0;
 const GLYPH_W: u32 = 5;
 const GLYPH_H: u32 = 7;
@@ -39,15 +40,15 @@ pub struct RoadAssets<'tex> {
 
 impl<'tex> RoadAssets<'tex> {
     pub fn load(creator: &'tex TextureCreator<WindowContext>) -> Result<Self, String> {
-        let approach_ns = load_texture(creator, "approach_ns.bmp")?;
-        let approach_ew = load_texture(creator, "approach_ew.bmp")?;
-        let intersection_core = load_texture(creator, "intersection_core.bmp")?;
+        let approach_ns = load_texture(creator, ROAD_ASSET_DIR, "approach_ns.bmp")?;
+        let approach_ew = load_texture(creator, ROAD_ASSET_DIR, "approach_ew.bmp")?;
+        let intersection_core = load_texture(creator, ROAD_ASSET_DIR, "intersection_core.bmp")?;
 
-        // Per-approach vehicle sprites (colored rectangles) rotated in `draw_frame` via SDL.
-        let vehicle_south = create_vehicle_texture(creator, vehicle_color(Cardinal::South))?;
-        let vehicle_north = create_vehicle_texture(creator, vehicle_color(Cardinal::North))?;
-        let vehicle_west = create_vehicle_texture(creator, vehicle_color(Cardinal::West))?;
-        let vehicle_east = create_vehicle_texture(creator, vehicle_color(Cardinal::East))?;
+        // Per-approach vehicle sprites (Time Fantasy style, eastbound authorship).
+        let vehicle_south = load_vehicle_texture(creator, Cardinal::South)?;
+        let vehicle_north = load_vehicle_texture(creator, Cardinal::North)?;
+        let vehicle_west = load_vehicle_texture(creator, Cardinal::West)?;
+        let vehicle_east = load_vehicle_texture(creator, Cardinal::East)?;
 
         let lane_labels = build_lane_label_textures(creator)?;
 
@@ -73,32 +74,46 @@ impl<'tex> RoadAssets<'tex> {
 
 fn load_texture<'tex>(
     creator: &'tex TextureCreator<WindowContext>,
+    dir: &str,
     file_name: &str,
 ) -> Result<Texture<'tex>, String> {
-    let path = Path::new(ROAD_ASSET_DIR).join(file_name);
+    let path = Path::new(dir).join(file_name);
     let surface = Surface::load_bmp(&path)
-        .map_err(|e| format!("failed to load road asset {}: {e}", path.display()))?;
+        .map_err(|e| format!("failed to load asset {}: {e}", path.display()))?;
     let texture = creator
         .create_texture_from_surface(&surface)
         .map_err(|e| format!("failed to create texture from {}: {e}", path.display()))?;
     Ok(texture)
 }
 
-/// Create a solid-colored vehicle sprite texture that we can rotate.
-fn create_vehicle_texture<'tex>(
+fn vehicle_asset_name(approach: Cardinal) -> &'static str {
+    match approach {
+        Cardinal::South => "vehicle_south.bmp",
+        Cardinal::North => "vehicle_north.bmp",
+        Cardinal::West => "vehicle_west.bmp",
+        Cardinal::East => "vehicle_east.bmp",
+    }
+}
+
+fn load_vehicle_texture<'tex>(
     creator: &'tex TextureCreator<WindowContext>,
-    color: Color,
+    approach: Cardinal,
 ) -> Result<Texture<'tex>, String> {
-    let width = VEHICLE_LENGTH.round() as u32;
-    let height = VEHICLE_WIDTH.round() as u32;
-    let mut surface = Surface::new(width, height, PixelFormatEnum::RGBA8888)
-        .map_err(|e| format!("failed to create vehicle surface: {e}"))?;
-    surface
-        .fill_rect(None, color)
-        .map_err(|e| format!("failed to fill vehicle surface: {e}"))?;
-    let texture = creator
-        .create_texture_from_surface(&surface)
-        .map_err(|e| format!("failed to create vehicle texture: {e}"))?;
+    let file_name = vehicle_asset_name(approach);
+    let path = Path::new(VEHICLE_ASSET_DIR).join(file_name);
+    let surface = Surface::load_bmp(&path).map_err(|e| {
+        format!(
+            "failed to load vehicle asset {}: {e} (run python3 scripts/generate_vehicle_sprites.py)",
+            path.display()
+        )
+    })?;
+    let mut texture = creator.create_texture_from_surface(&surface).map_err(|e| {
+        format!(
+            "failed to create vehicle texture from {}: {e}",
+            path.display()
+        )
+    })?;
+    texture.set_blend_mode(sdl2::render::BlendMode::Blend);
     Ok(texture)
 }
 
@@ -339,15 +354,6 @@ fn draw_vehicle_sprite(
     Ok(())
 }
 
-fn vehicle_color(approach: Cardinal) -> Color {
-    match approach {
-        Cardinal::South => Color::RGB(230, 70, 70),
-        Cardinal::North => Color::RGB(70, 130, 230),
-        Cardinal::West => Color::RGB(240, 180, 40),
-        Cardinal::East => Color::RGB(60, 190, 90),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,6 +374,12 @@ mod tests {
         assert!(INTERSECTION_CENTER_X as i32 + half + ew_arm <= WINDOW_WIDTH as i32);
         assert!(INTERSECTION_CENTER_Y as i32 - half - ns_arm >= 0);
         assert!(INTERSECTION_CENTER_Y as i32 + half + ns_arm <= WINDOW_HEIGHT as i32);
+    }
+
+    #[test]
+    fn vehicle_asset_paths_are_under_assets_dir() {
+        let path = Path::new(VEHICLE_ASSET_DIR).join("vehicle_east.bmp");
+        assert!(path.starts_with("assets/vehicles"));
     }
 
     #[test]
