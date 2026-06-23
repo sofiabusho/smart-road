@@ -123,8 +123,8 @@ Execution order:
 |----|--------|--------|------|------|-----------|-------------------|-------|
 | C01 | ✅ | **Smart detection + timer start**: managed zone entry | M | B02 🔗 | REQ-3, REQ-4, REQ-23 | AUD-25, AUD-26 (with C06) | C |
 | C02 | ✅ | **Smart scheduler**: velocity/time coordination | L | C01, B03 🔗, B04 🔗 | REQ-3, REQ-9 · AUD-8–AUD-14 | AUD-8–AUD-14 | C |
-| C03 | ⬜ | **Yield on conflict**: slowdown avoidance | M | C02 | REQ-9 · AUD-15 | AUD-15 | C |
-| C04 | ⬜ | **Sustained traffic**: R ≥1 min, congestion cap | M | C02, A06 🔗 | REQ-3 · AUD-16, AUD-17 | AUD-16, AUD-17 | C |
+| C03 | ✅ | **Yield on conflict**: slowdown avoidance | M | C02 | REQ-9 · AUD-15 | AUD-15 | C |
+| C04 | ✅ | **Sustained traffic**: R ≥1 min, congestion cap | M | C02, A06 🔗 | REQ-3 · AUD-16, AUD-17 | AUD-16, AUD-17 | C |
 | C05 | ✅ | **Stats collector**: min/max velocity, crossing times, close calls | M | C01 | REQ-20–REQ-26 | AUD-20–AUD-24 | C |
 | C06 | ⬜ | **Stats window on Esc**: display all fields | M | C05 | REQ-17, REQ-19 · AUD-18, AUD-19 | AUD-18–AUD-24, AUD-25 | C |
 | C07 | ⬜ | **Audit dry-run**: full AUD-1–AUD-31 pass, README runbook | S | C06, A07 🔗, C03 🔗, C04 🔗 | NFR-5 · AUD-1–AUD-31 | Gate G2 | C |

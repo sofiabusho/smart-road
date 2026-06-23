@@ -6,6 +6,9 @@ use std::time::{Duration, Instant};
 use crate::intersection::{Cardinal, IntersectionModel, LaneId, Route, Vec2};
 use crate::vehicle::{spawn_vehicle, Vehicle, VehicleId, VehicleState};
 
+/// Maximum vehicles allowed on a single lane before new spawns are blocked (AUD-17).
+pub const LANE_CAPACITY: usize = 8;
+
 /// Lightweight PRNG for spawn randomization (no extra crate dependency).
 #[derive(Debug, Clone)]
 struct SpawnRng {
@@ -137,9 +140,18 @@ impl SpawnSystem {
         &mut self.vehicles
     }
 
-    /// Attempt to spawn a vehicle from a request. Returns `None` if cooldown rejects.
+    /// Attempt to spawn a vehicle from a request. Returns `None` if cooldown or congestion rejects.
     pub fn try_spawn(&mut self, req: SpawnRequest, model: &IntersectionModel) -> Option<VehicleId> {
         if !self.cooldown.allows(req.approach) {
+            return None;
+        }
+
+        let queued = self
+            .vehicles
+            .iter()
+            .filter(|v| v.lane_id == req.lane_id && v.state != VehicleState::Done)
+            .count();
+        if queued >= LANE_CAPACITY {
             return None;
         }
 
@@ -197,6 +209,17 @@ impl SpawnSystem {
         crate::vehicle::clamp_velocity_for_proximity(&mut self.vehicles);
         self.vehicles.retain(|v| v.state != VehicleState::Done);
         exited
+    }
+
+    /// Backdate all per-direction cooldowns so that the next `try_spawn` / `spawn_random`
+    /// call on any approach is not gated by the wall-clock window.  Use this in tests
+    /// whose frame loops run faster than the 400 ms cooldown period.
+    pub fn force_cooldowns_expired(&mut self) {
+        let past = std::time::Instant::now()
+            - std::time::Duration::from_millis(crate::config::SPAWN_COOLDOWN_MS + 1);
+        for approach in Cardinal::ALL {
+            self.cooldown.record_at(approach, past);
+        }
     }
 
     fn route_for_approach(&self, approach: Cardinal) -> Route {
