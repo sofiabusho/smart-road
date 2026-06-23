@@ -46,6 +46,18 @@ pub fn format_stats_lines(stats: &Stats) -> Vec<String> {
             format_crossing_time(stats.min_crossing_time, false)
         ),
         format!("Close calls: {}", stats.close_calls),
+        String::new(),
+        "--- Additional statistics (bonus) ---".to_string(),
+        format!(
+            "Session duration (s): {}",
+            format_crossing_time(stats.session_duration_secs, true)
+        ),
+        format!(
+            "Avg crossing time (s): {}",
+            format_crossing_time(stats.avg_crossing_time_secs, true)
+        ),
+        format!("Peak concurrent in zone: {}", stats.peak_concurrent_in_zone),
+        format!("Vehicles entered zone: {}", stats.vehicles_entered_zone),
     ]
 }
 
@@ -280,17 +292,37 @@ const FONT8X8_BASIC: [[u8; 8]; 95] = [
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stats::{apply_event, StatsEvent};
+    use crate::vehicle::VehicleId;
 
     fn sample_stats() -> Stats {
-        Stats {
-            vehicles_passed: 4,
-            max_vehicles_passed: 4,
-            max_velocity: 120.0,
-            min_velocity: 80.0,
-            max_crossing_time: 2.5,
-            min_crossing_time: 1.0,
-            close_calls: 0,
+        let mut stats = Stats::new();
+        for (crossing_time, peak_velocity) in [(2.5, 120.0), (1.0, 80.0), (2.0, 100.0), (1.5, 90.0)]
+        {
+            apply_event(
+                &mut stats,
+                StatsEvent::VehicleExited {
+                    id: VehicleId(1),
+                    crossing_time,
+                    peak_velocity,
+                },
+            );
         }
+        stats.vehicles_entered_zone = 4;
+        stats.peak_concurrent_in_zone = 2;
+        stats.finalize_session(12.0);
+        stats
+    }
+
+    #[test]
+    fn format_includes_bonus_statistics_for_aud_b1() {
+        let lines = format_stats_lines(&sample_stats());
+        let joined = lines.join("\n");
+        assert!(joined.contains("Additional statistics (bonus)"));
+        assert!(joined.contains("Session duration (s):"));
+        assert!(joined.contains("Avg crossing time (s):"));
+        assert!(joined.contains("Peak concurrent in zone:"));
+        assert!(joined.contains("Vehicles entered zone:"));
     }
 
     #[test]
@@ -315,15 +347,15 @@ mod tests {
 
     #[test]
     fn single_vehicle_max_equals_min_crossing_time() {
-        let stats = Stats {
-            vehicles_passed: 1,
-            max_vehicles_passed: 1,
-            max_velocity: 100.0,
-            min_velocity: 100.0,
-            max_crossing_time: 1.75,
-            min_crossing_time: 1.75,
-            close_calls: 0,
-        };
+        let mut stats = Stats::new();
+        apply_event(
+            &mut stats,
+            StatsEvent::VehicleExited {
+                id: VehicleId(1),
+                crossing_time: 1.75,
+                peak_velocity: 100.0,
+            },
+        );
         let lines = format_stats_lines(&stats);
         let max_line = lines
             .iter()

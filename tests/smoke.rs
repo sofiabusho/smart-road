@@ -770,8 +770,10 @@ fn assert_no_collisions(vehicles: &[smart_road::vehicle::Vehicle]) {
     }
 }
 
-fn assert_stats_window_fields(stats: &smart_road::stats::Stats) {
-    let lines = format_stats_lines(stats);
+fn assert_stats_window_fields(stats: &smart_road::stats::Stats, session_time: f32) {
+    let mut display_stats = stats.clone();
+    display_stats.finalize_session(session_time);
+    let lines = format_stats_lines(&display_stats);
     let joined = lines.join("\n");
 
     assert!(
@@ -797,6 +799,42 @@ fn assert_stats_window_fields(stats: &smart_road::stats::Stats) {
     assert!(
         !joined.contains("Max velocity: 0"),
         "max velocity should be positive after vehicles moved"
+    );
+    assert!(
+        joined.contains("Additional statistics (bonus)"),
+        "AUD-B1 bonus section missing"
+    );
+    assert!(
+        joined.contains("Session duration (s):"),
+        "AUD-B1 session duration label missing"
+    );
+    assert!(
+        display_stats.session_duration_secs > 0.0,
+        "AUD-B1 session duration should be positive after simulation"
+    );
+    assert!(
+        joined.contains("Avg crossing time (s):"),
+        "AUD-B1 avg crossing time label missing"
+    );
+    assert!(
+        display_stats.avg_crossing_time_secs > 0.0,
+        "AUD-B1 avg crossing time should be positive after vehicles crossed"
+    );
+    assert!(
+        joined.contains("Peak concurrent in zone:"),
+        "AUD-B1 peak concurrent label missing"
+    );
+    assert!(
+        display_stats.peak_concurrent_in_zone > 0,
+        "AUD-B1 peak concurrent should be positive when vehicles crossed zone"
+    );
+    assert!(
+        joined.contains("Vehicles entered zone:"),
+        "AUD-B1 vehicles entered zone label missing"
+    );
+    assert!(
+        display_stats.vehicles_entered_zone > 0,
+        "AUD-B1 vehicles entered zone should count managed entries"
     );
 }
 
@@ -830,8 +868,10 @@ fn crate_smoke_audit18_four_vehicle_session_no_collision() {
     );
     assert_eq!(stats.stats.max_vehicles_passed, 4);
 
-    assert_stats_window_fields(&stats.stats);
-    let lines = format_stats_lines(&stats.stats);
+    assert_stats_window_fields(&stats.stats, session_time);
+    let mut display_stats = stats.stats.clone();
+    display_stats.finalize_session(session_time);
+    let lines = format_stats_lines(&display_stats);
     assert!(lines.iter().any(|l| l.contains("Max vehicles passed: 4")));
     assert!(lines.iter().any(|l| l.contains("Close calls: 0")));
 }
@@ -865,8 +905,10 @@ fn crate_smoke_audit25_single_vehicle_equal_crossing_times() {
         "AUD-25: max and min crossing time should match for one vehicle"
     );
 
-    assert_stats_window_fields(&stats.stats);
-    let lines = format_stats_lines(&stats.stats);
+    assert_stats_window_fields(&stats.stats, session_time);
+    let mut display_stats = stats.stats.clone();
+    display_stats.finalize_session(session_time);
+    let lines = format_stats_lines(&display_stats);
     let max_line = lines
         .iter()
         .find(|l| l.starts_with("Max time"))
