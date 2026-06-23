@@ -642,12 +642,14 @@ mod tests {
                     Cardinal::East => "WEST",
                     Cardinal::West => "EAST",
                 },
-                Route::Right | Route::Left => match exit_cardinal_for_turn(lane.approach, lane.route) {
-                    Cardinal::West => "WEST",
-                    Cardinal::East => "EAST",
-                    Cardinal::North => "NORTH",
-                    Cardinal::South => "SOUTH",
-                },
+                Route::Right | Route::Left => {
+                    match exit_cardinal_for_turn(lane.approach, lane.route) {
+                        Cardinal::West => "WEST",
+                        Cardinal::East => "EAST",
+                        Cardinal::North => "NORTH",
+                        Cardinal::South => "SOUTH",
+                    }
+                }
             };
             assert_eq!(
                 actual, expected,
@@ -729,12 +731,7 @@ mod tests {
             assert!(
                 aligned,
                 "{:?} {:?} should exit on {:?} outbound {:?}, connector ({:.1}, {:.1})",
-                lane.approach,
-                lane.route,
-                exit,
-                lane.route,
-                connector.x,
-                connector.y
+                lane.approach, lane.route, exit, lane.route, connector.x, connector.y
             );
         }
     }
