@@ -11,7 +11,7 @@ Implements **turn animation** by rendering each vehicle as a rotated sprite whos
 ## Key Changes
 
 - **`src/render.rs`**: Extends `RoadAssets` with per-approach vehicle textures and updates `draw_frame` to render vehicles via a new internal `draw_vehicle_sprite` helper using `canvas.copy_ex` with `heading_rad`-derived rotation.
-- **`src/render.rs`**: Keeps the existing `draw_vehicle` colored-rectangle helper for backwards compatibility, while delegating the live frame rendering to the sprite-based path-tangent rotation.
+- **`src/render.rs`**: Removes the superseded `draw_vehicle` colored-rectangle helper; live frame rendering uses sprite-based path-tangent rotation only.
 
 ## Technical Decisions
 
@@ -23,8 +23,8 @@ Implements **turn animation** by rendering each vehicle as a rotated sprite whos
 ### Automated Checks
 
 - [x] `cargo test` — all unit + integration tests pass (including intersection/path and render layout tests).
-- [x] `cargo fmt --check` — clean.
-- [ ] `cargo clippy -- -D warnings` — **not run in this session**; expected to stay clean given localized render changes, but should be re-run in CI/local dev per A02.
+- [x] `cargo fmt --check` — clean (no diff).
+- [x] `cargo clippy -- -D warnings` — clean (no warnings emitted).
 
 ### Manual Audit (against `docs/audit.md`)
 
@@ -38,11 +38,10 @@ Implements **turn animation** by rendering each vehicle as a rotated sprite whos
 ## Artifacts
 
 - **Test output**: `cargo test` from project root — 51 unit tests + 6 integration tests passing.
-- **Lint/format output**: `cargo fmt --check` passing; clippy to be re-run in CI or the next quality pass.
+- **Lint/format output**: `cargo fmt --check` and `cargo clippy -- -D warnings` both pass with no warnings or formatting diffs.
 
 ---
 
 ## Next Steps
 
 A07 unblocks **C07**’s audit dry-run work for the “animation required” portions of Gate G2, once C03/C04 finish collision and sustained-traffic scenarios. Manual reviewers should record AUD-28 visual notes alongside B02’s route-adherence checks to confirm that sprite rotation and path-following both look correct on all 4×3 lane combinations.
-

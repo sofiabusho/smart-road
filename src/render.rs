@@ -1,4 +1,4 @@
-//! SDL2 drawing for intersection and vehicles (A03/A07).
+//! SDL2 drawing for intersection and vehicles.
 
 use std::path::Path;
 
@@ -35,12 +35,9 @@ impl<'tex> RoadAssets<'tex> {
         let approach_ew = load_texture(creator, "approach_ew.bmp")?;
         let intersection_core = load_texture(creator, "intersection_core.bmp")?;
 
-        // A07: create simple per-approach vehicle sprites that we can rotate with SDL.
-        // These are small colored rectangles stored as textures and rotated in `draw_frame`.
-        let vehicle_south =
-            create_vehicle_texture(creator, vehicle_color(Cardinal::South))?;
-        let vehicle_north =
-            create_vehicle_texture(creator, vehicle_color(Cardinal::North))?;
+        // Per-approach vehicle sprites (colored rectangles) rotated in `draw_frame` via SDL.
+        let vehicle_south = create_vehicle_texture(creator, vehicle_color(Cardinal::South))?;
+        let vehicle_north = create_vehicle_texture(creator, vehicle_color(Cardinal::North))?;
         let vehicle_west = create_vehicle_texture(creator, vehicle_color(Cardinal::West))?;
         let vehicle_east = create_vehicle_texture(creator, vehicle_color(Cardinal::East))?;
 
@@ -135,7 +132,7 @@ pub fn draw_intersection(
     Ok(())
 }
 
-/// Draw one frame (intersection + vehicles). A03: intersection; A04: vehicle rects; A07: sprites.
+/// Draw one frame: intersection tiles plus rotated vehicle sprites.
 pub fn draw_frame(
     canvas: &mut Canvas<Window>,
     intersection: &IntersectionModel,
@@ -149,7 +146,7 @@ pub fn draw_frame(
     Ok(())
 }
 
-/// Draw a single vehicle sprite rotated to match its path tangent (A07).
+/// Draw a single vehicle sprite rotated to match its path tangent.
 fn draw_vehicle_sprite(
     canvas: &mut Canvas<Window>,
     assets: &RoadAssets<'_>,
@@ -161,7 +158,7 @@ fn draw_vehicle_sprite(
     let cx = snapshot.position.x.round() as i32;
     let cy = snapshot.position.y.round() as i32;
 
-    // Choose a pre-colored sprite based on the spawning approach to preserve A04 visuals.
+    // Per-approach sprite color matches spawn direction.
     let texture = match snapshot.approach {
         Cardinal::South => &assets.vehicle_south,
         Cardinal::North => &assets.vehicle_north,
@@ -175,25 +172,6 @@ fn draw_vehicle_sprite(
     canvas
         .copy_ex(texture, None, dst, angle_degrees, None, false, false)
         .map_err(|e| format!("draw vehicle sprite: {e}"))?;
-    Ok(())
-}
-
-/// Draw a single vehicle as a colored oriented rectangle (A04; A07 adds sprite rotation).
-pub fn draw_vehicle(
-    canvas: &mut Canvas<Window>,
-    snapshot: &VehicleRenderSnapshot,
-) -> Result<(), String> {
-    let (w, h) = vehicle_dimensions_from_heading(snapshot.heading_rad);
-    let half_w = w / 2;
-    let half_h = h / 2;
-    let cx = snapshot.position.x.round() as i32;
-    let cy = snapshot.position.y.round() as i32;
-
-    canvas.set_draw_color(vehicle_color(snapshot.approach));
-    let rect = Rect::new(cx - half_w, cy - half_h, w as u32, h as u32);
-    canvas
-        .fill_rect(rect)
-        .map_err(|e| format!("draw vehicle: {e}"))?;
     Ok(())
 }
 
