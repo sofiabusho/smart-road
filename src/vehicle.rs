@@ -197,7 +197,7 @@ pub fn enforce_follow_distance(vehicles: &mut [Vehicle], safe_distance: f32) {
             }
         }
 
-        if gap_ahead >= safe_distance {
+        if gap_ahead > safe_distance {
             vehicles[i].commanded_velocity = nominal;
             continue;
         }
@@ -209,7 +209,18 @@ pub fn enforce_follow_distance(vehicles: &mut [Vehicle], safe_distance: f32) {
             leader_velocity.min(nominal * scale)
         };
 
-        vehicles[i].commanded_velocity = target;
+        let dt = crate::config::FIXED_TIMESTEP_SECS;
+        let capped = if leader_velocity < 0.01 {
+            // Stopped leader: B05 ramp cannot overshoot spacing while decelerating.
+            let max_speed_for_gap = ((gap_ahead - safe_distance).max(0.0)) / dt;
+            target.min(max_speed_for_gap)
+        } else {
+            // Moving leader: match pace, never close faster than the vehicle ahead.
+            target.min(leader_velocity)
+        };
+
+        vehicles[i].commanded_velocity = capped;
+        vehicles[i].velocity = vehicles[i].velocity.min(capped);
     }
 }
 
