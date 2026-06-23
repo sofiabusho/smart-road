@@ -9,6 +9,15 @@ pub const WINDOW_WIDTH: u32 = 1024;
 /// Default window height in pixels.
 pub const WINDOW_HEIGHT: u32 = 768;
 
+/// Post-session statistics window title (C06 / REQ-19).
+pub const STATS_WINDOW_TITLE: &str = "smart-road — session statistics";
+
+/// Statistics window width in pixels.
+pub const STATS_WINDOW_WIDTH: u32 = 520;
+
+/// Statistics window height in pixels.
+pub const STATS_WINDOW_HEIGHT: u32 = 360;
+
 /// Target frames per second for the game loop.
 pub const TARGET_FPS: u32 = 60;
 

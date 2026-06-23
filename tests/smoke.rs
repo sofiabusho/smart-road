@@ -1,13 +1,18 @@
 //! Integration smoke tests (A02) — no SDL2 required.
+use std::thread;
+use std::time::Duration;
+
 use sdl2::keyboard::Keycode;
 use smart_road::config::{
-    FIXED_TIMESTEP_SECS, TARGET_FPS, WINDOW_HEIGHT, WINDOW_TITLE, WINDOW_WIDTH,
+    FIXED_TIMESTEP_SECS, SPAWN_COOLDOWN_MS, STATS_WINDOW_TITLE, TARGET_FPS, VEHICLE_LENGTH,
+    WINDOW_HEIGHT, WINDOW_TITLE, WINDOW_WIDTH,
 };
 use smart_road::input::{approach_for_arrow, InputEvent, InputState};
 use smart_road::intersection::{lane_id, Cardinal, IntersectionModel, Route, Vec2};
 use smart_road::smart::SmartController;
 use smart_road::spawn::{SpawnRequest, SpawnSystem};
 use smart_road::stats::StatsSession;
+use smart_road::stats_window::format_stats_lines;
 use smart_road::vehicle::VehicleState;
 #[test]
 fn crate_smoke_config_constants() {
@@ -705,4 +710,186 @@ fn crate_unit_lane_cap_blocks_ninth_spawn() {
         spawn.try_spawn(req, &model).is_none(),
         "try_spawn must return None when lane is already at LANE_CAPACITY"
     );
+}
+
+fn simulate_session_tick(
+    spawn: &mut SpawnSystem,
+    smart: &mut SmartController,
+    stats: &mut StatsSession,
+    model: &IntersectionModel,
+    session_time: &mut f32,
+) {
+    *session_time += FIXED_TIMESTEP_SECS;
+    smart.update(spawn.vehicles_mut(), model, FIXED_TIMESTEP_SECS);
+    let exited = spawn.update(model, FIXED_TIMESTEP_SECS);
+    stats.observe_vehicles(spawn.vehicles(), *session_time);
+    for exit in exited {
+        stats.record_exit(exit.id, exit.time_in_crossing);
+    }
+}
+
+fn spawn_cardinal_with_cooldown(
+    spawn: &mut SpawnSystem,
+    approach: Cardinal,
+    model: &IntersectionModel,
+    count: u32,
+) {
+    for _ in 0..count {
+        spawn.spawn_on_approach(approach, model);
+        thread::sleep(Duration::from_millis(SPAWN_COOLDOWN_MS + 10));
+    }
+}
+
+fn vehicles_overlap(a: &smart_road::vehicle::Vehicle, b: &smart_road::vehicle::Vehicle) -> bool {
+    let dx = a.position.x - b.position.x;
+    let dy = a.position.y - b.position.y;
+    let min_gap = VEHICLE_LENGTH * 0.85;
+    dx * dx + dy * dy < min_gap * min_gap
+}
+
+fn assert_no_collisions(vehicles: &[smart_road::vehicle::Vehicle]) {
+    for i in 0..vehicles.len() {
+        if vehicles[i].state == VehicleState::Done {
+            continue;
+        }
+        for j in (i + 1)..vehicles.len() {
+            if vehicles[j].state == VehicleState::Done {
+                continue;
+            }
+            assert!(
+                !vehicles_overlap(&vehicles[i], &vehicles[j]),
+                "AUD-18: vehicles {:?} and {:?} overlapped at ({:.1}, {:.1}) vs ({:.1}, {:.1})",
+                vehicles[i].id,
+                vehicles[j].id,
+                vehicles[i].position.x,
+                vehicles[i].position.y,
+                vehicles[j].position.x,
+                vehicles[j].position.y
+            );
+        }
+    }
+}
+
+fn assert_stats_window_fields(stats: &smart_road::stats::Stats) {
+    let lines = format_stats_lines(stats);
+    let joined = lines.join("\n");
+
+    assert!(
+        joined.contains("Max vehicles passed:"),
+        "AUD-20 label missing"
+    );
+    assert!(joined.contains("Max velocity:"), "AUD-21 max label missing");
+    assert!(joined.contains("Min velocity:"), "AUD-21 min label missing");
+    assert!(
+        joined.contains("Max time to pass intersection (s):"),
+        "AUD-22 label missing"
+    );
+    assert!(
+        joined.contains("Min time to pass intersection (s):"),
+        "AUD-23 label missing"
+    );
+    assert!(joined.contains("Close calls:"), "AUD-24 label missing");
+
+    assert!(
+        !joined.contains("Min velocity: N/A") || stats.min_velocity == f32::MAX,
+        "min velocity should be numeric after vehicles moved"
+    );
+    assert!(
+        !joined.contains("Max velocity: 0"),
+        "max velocity should be positive after vehicles moved"
+    );
+}
+
+/// AUD-18/20–24 mirror: two Arrow Up + two Arrow Right, all cross without overlap.
+#[test]
+fn crate_smoke_audit18_four_vehicle_session_no_collision() {
+    let model = IntersectionModel::new();
+    let mut spawn = SpawnSystem::new();
+    let mut smart = SmartController::new();
+    let mut stats = StatsSession::new();
+    let mut session_time = 0.0_f32;
+
+    spawn_cardinal_with_cooldown(&mut spawn, Cardinal::South, &model, 2);
+    spawn_cardinal_with_cooldown(&mut spawn, Cardinal::West, &model, 2);
+
+    let deadline = 120.0_f32;
+    while stats.stats.vehicles_passed < 4 && session_time < deadline {
+        simulate_session_tick(
+            &mut spawn,
+            &mut smart,
+            &mut stats,
+            &model,
+            &mut session_time,
+        );
+        assert_no_collisions(spawn.vehicles());
+    }
+
+    assert_eq!(
+        stats.stats.vehicles_passed, 4,
+        "AUD-18/20: expected four completed crossings"
+    );
+    assert_eq!(stats.stats.max_vehicles_passed, 4);
+
+    assert_stats_window_fields(&stats.stats);
+    let lines = format_stats_lines(&stats.stats);
+    assert!(lines.iter().any(|l| l.contains("Max vehicles passed: 4")));
+    assert!(lines.iter().any(|l| l.contains("Close calls: 0")));
+}
+
+/// AUD-25 mirror: one vehicle — max crossing time equals min crossing time.
+#[test]
+fn crate_smoke_audit25_single_vehicle_equal_crossing_times() {
+    let model = IntersectionModel::new();
+    let mut spawn = SpawnSystem::new();
+    let mut smart = SmartController::new();
+    let mut stats = StatsSession::new();
+    let mut session_time = 0.0_f32;
+
+    spawn
+        .try_spawn(SpawnRequest::new(Cardinal::South, Route::Straight), &model)
+        .expect("spawn succeeds");
+
+    while stats.stats.vehicles_passed < 1 && session_time < 60.0 {
+        simulate_session_tick(
+            &mut spawn,
+            &mut smart,
+            &mut stats,
+            &model,
+            &mut session_time,
+        );
+    }
+
+    assert_eq!(stats.stats.vehicles_passed, 1);
+    assert!(
+        (stats.stats.max_crossing_time - stats.stats.min_crossing_time).abs() < f32::EPSILON,
+        "AUD-25: max and min crossing time should match for one vehicle"
+    );
+
+    assert_stats_window_fields(&stats.stats);
+    let lines = format_stats_lines(&stats.stats);
+    let max_line = lines
+        .iter()
+        .find(|l| l.starts_with("Max time"))
+        .expect("max line");
+    let min_line = lines
+        .iter()
+        .find(|l| l.starts_with("Min time"))
+        .expect("min line");
+    assert_eq!(
+        max_line.split(": ").nth(1),
+        min_line.split(": ").nth(1),
+        "AUD-25: formatted max/min crossing times must match"
+    );
+}
+
+/// AUD-19 structural check: stats UI uses a distinct window title from the sim window.
+#[test]
+fn crate_smoke_audit19_stats_window_is_separate_surface() {
+    use smart_road::config::WINDOW_TITLE;
+
+    assert_ne!(
+        STATS_WINDOW_TITLE, WINDOW_TITLE,
+        "AUD-19: stats window must be a separate surface from the simulation window"
+    );
+    assert!(STATS_WINDOW_TITLE.contains("statistics"));
 }

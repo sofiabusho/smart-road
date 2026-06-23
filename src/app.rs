@@ -15,6 +15,7 @@ use crate::render::{self, RoadAssets};
 use crate::smart::SmartController;
 use crate::spawn::SpawnSystem;
 use crate::stats::StatsSession;
+use crate::stats_window::{session_summary_from, show_stats_window, SessionSummary};
 use crate::vehicle::snapshot_for_render;
 use crate::vehicle::{detect_close_call, VehicleState};
 
@@ -66,10 +67,17 @@ impl App {
             session_time: 0.0,
         };
 
+        let mut show_stats_on_exit = false;
         while app.running {
             app.poll_events()?;
-            app.update();
+            if app.update() {
+                show_stats_on_exit = true;
+            }
             app.draw(&mut canvas, &road_assets)?;
+        }
+
+        if show_stats_on_exit {
+            show_stats_window(&app._sdl, end_session(&app))?;
         }
 
         Ok(())
@@ -96,7 +104,9 @@ impl App {
         Ok(())
     }
 
-    fn update(&mut self) {
+    /// Returns `true` when the user pressed `Esc` to end the session (C06).
+    fn update(&mut self) -> bool {
+        let mut exit_requested = false;
         for event in self.input.drain_events().collect::<Vec<_>>() {
             match event {
                 InputEvent::SpawnCardinal(approach) => {
@@ -104,24 +114,7 @@ impl App {
                 }
                 InputEvent::RandomStream(_) => {}
                 InputEvent::Exit => {
-                    // C06 replaces this with end_session + stats window.
-                    eprintln!(
-                        "[smart-road] session stats (C06 will display): passed={} max_v={:.1} min_v={:.1} max_t={:.2}s min_t={:.2}s close_calls={}",
-                        self.stats.stats.vehicles_passed,
-                        self.stats.stats.max_velocity,
-                        if self.stats.stats.min_velocity == f32::MAX {
-                            0.0
-                        } else {
-                            self.stats.stats.min_velocity
-                        },
-                        self.stats.stats.max_crossing_time,
-                        if self.stats.stats.min_crossing_time == f32::MAX {
-                            0.0
-                        } else {
-                            self.stats.stats.min_crossing_time
-                        },
-                        self.stats.stats.close_calls,
-                    );
+                    exit_requested = true;
                     self.running = false;
                 }
             }
@@ -145,6 +138,8 @@ impl App {
         for exit in exited {
             self.stats.record_exit(exit.id, exit.time_in_crossing);
         }
+
+        exit_requested
     }
 
     fn record_close_calls(&mut self) {
@@ -180,4 +175,9 @@ impl App {
         canvas.present();
         Ok(())
     }
+}
+
+/// Capture session metrics for the post-`Esc` statistics window (SDS §13.4).
+pub fn end_session(app: &App) -> SessionSummary {
+    session_summary_from(app.stats.stats.clone())
 }

@@ -63,7 +63,7 @@ cargo build
 cargo run
 ```
 
-A window titled **smart-road** opens showing a **four-way cross intersection** with road tile assets. Close the window or press **Esc** to quit.
+A window titled **smart-road** opens showing a **four-way cross intersection** with road tile assets. Press **Esc** after a session to close the simulation and open the **session statistics** window. Close that window (or press **Esc** again) to quit. You can also close the main window directly without viewing stats.
 
 ## Development commands
 
