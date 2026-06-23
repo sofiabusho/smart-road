@@ -6,6 +6,9 @@ use std::time::{Duration, Instant};
 use crate::intersection::{Cardinal, IntersectionModel, LaneId, Route, Vec2};
 use crate::vehicle::{spawn_vehicle, Vehicle, VehicleId, VehicleState};
 
+/// Maximum vehicles allowed on a single lane before new spawns are blocked (AUD-17).
+pub const LANE_CAPACITY: usize = 8;
+
 /// Lightweight PRNG for spawn randomization (no extra crate dependency).
 #[derive(Debug, Clone)]
 struct SpawnRng {
@@ -137,9 +140,18 @@ impl SpawnSystem {
         &mut self.vehicles
     }
 
-    /// Attempt to spawn a vehicle from a request. Returns `None` if cooldown rejects.
+    /// Attempt to spawn a vehicle from a request. Returns `None` if cooldown or congestion rejects.
     pub fn try_spawn(&mut self, req: SpawnRequest, model: &IntersectionModel) -> Option<VehicleId> {
         if !self.cooldown.allows(req.approach) {
+            return None;
+        }
+
+        let queued = self
+            .vehicles
+            .iter()
+            .filter(|v| v.lane_id == req.lane_id && v.state != VehicleState::Done)
+            .count();
+        if queued >= LANE_CAPACITY {
             return None;
         }
 
@@ -147,7 +159,8 @@ impl SpawnSystem {
         let id = VehicleId(self.next_id);
         self.next_id += 1;
 
-        let vehicle = spawn_vehicle(id, lane, crate::config::DEFAULT_SPAWN_VELOCITY);
+        let mut vehicle = spawn_vehicle(id, lane, crate::config::DEFAULT_SPAWN_VELOCITY);
+        vehicle.position = spawn_position_on_lane(lane, &self.vehicles);
         self.vehicles.push(vehicle);
         self.cooldown.record(req.approach);
         Some(id)
@@ -175,6 +188,7 @@ impl SpawnSystem {
     /// Advance movement along lane paths and remove vehicles that left the canvas.
     pub fn update(&mut self, model: &IntersectionModel, dt: f32) -> Vec<VehicleExit> {
         crate::vehicle::enforce_follow_distance(&mut self.vehicles, crate::config::SAFE_DISTANCE);
+        crate::vehicle::clamp_velocity_for_proximity(&mut self.vehicles);
         let mut exited = Vec::new();
 
         for vehicle in &mut self.vehicles {
@@ -192,8 +206,20 @@ impl SpawnSystem {
                 vehicle.state = VehicleState::Done;
             }
         }
+        crate::vehicle::clamp_velocity_for_proximity(&mut self.vehicles);
         self.vehicles.retain(|v| v.state != VehicleState::Done);
         exited
+    }
+
+    /// Backdate all per-direction cooldowns so that the next `try_spawn` / `spawn_random`
+    /// call on any approach is not gated by the wall-clock window.  Use this in tests
+    /// whose frame loops run faster than the 400 ms cooldown period.
+    pub fn force_cooldowns_expired(&mut self) {
+        let past = std::time::Instant::now()
+            - std::time::Duration::from_millis(crate::config::SPAWN_COOLDOWN_MS + 1);
+        for approach in Cardinal::ALL {
+            self.cooldown.record_at(approach, past);
+        }
     }
 
     fn route_for_approach(&self, approach: Cardinal) -> Route {
@@ -211,6 +237,39 @@ impl Default for SpawnSystem {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Place a new vehicle behind the rearmost same-lane queue near the spawn point (AUD-8).
+fn spawn_position_on_lane(lane: &crate::intersection::LaneInfo, existing: &[Vehicle]) -> Vec2 {
+    let heading = lane.approach.travel_heading();
+    let mut position = lane.spawn_point;
+
+    let mut rearmost: Option<&Vehicle> = None;
+    let mut smallest_along = f32::INFINITY;
+
+    for vehicle in existing {
+        if vehicle.lane_id != lane.id || vehicle.state == VehicleState::Done {
+            continue;
+        }
+        let dx = vehicle.position.x - lane.spawn_point.x;
+        let dy = vehicle.position.y - lane.spawn_point.y;
+        let along = dx * heading.cos() + dy * heading.sin();
+        if along >= 0.0 && along < smallest_along {
+            smallest_along = along;
+            rearmost = Some(vehicle);
+        }
+    }
+
+    if let Some(leader) = rearmost {
+        if smallest_along < crate::config::SAFE_DISTANCE * 4.0 {
+            position = Vec2::new(
+                leader.position.x - crate::config::SAFE_DISTANCE * 1.5 * heading.cos(),
+                leader.position.y - crate::config::SAFE_DISTANCE * 1.5 * heading.sin(),
+            );
+        }
+    }
+
+    position
 }
 
 /// True when the vehicle center is at or beyond the window margin.

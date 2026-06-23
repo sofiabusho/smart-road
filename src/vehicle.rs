@@ -231,6 +231,60 @@ pub fn detect_close_call(a: &Vehicle, b: &Vehicle, safe_distance: f32) -> bool {
     dist_sq > 0.0 && dist_sq < safe_distance * safe_distance
 }
 
+/// Zero commanded speed and nudge apart when centers are within one vehicle length.
+///
+/// Runs in a loop until no pair remains within `min_gap`; this handles cascade scenarios
+/// where pushing pair (A, B) moves A into proximity with C, which would otherwise go
+/// unresolved in a single-pass sweep.
+pub fn clamp_velocity_for_proximity(vehicles: &mut [Vehicle]) {
+    let min_gap = crate::config::VEHICLE_LENGTH * 0.95;
+    let len = vehicles.len();
+
+    loop {
+        let mut any_pushed = false;
+
+        for i in 0..len {
+            if vehicles[i].state == VehicleState::Done {
+                continue;
+            }
+            for j in (i + 1)..len {
+                if vehicles[j].state == VehicleState::Done {
+                    continue;
+                }
+                let dx = vehicles[i].position.x - vehicles[j].position.x;
+                let dy = vehicles[i].position.y - vehicles[j].position.y;
+                let gap = (dx * dx + dy * dy).sqrt();
+                if gap < min_gap {
+                    any_pushed = true;
+                    vehicles[i].commanded_velocity = 0.0;
+                    vehicles[i].velocity = 0.0;
+                    vehicles[j].commanded_velocity = 0.0;
+                    vehicles[j].velocity = 0.0;
+
+                    if gap > f32::EPSILON {
+                        let push = (min_gap - gap) * 0.5 + 0.5;
+                        let nx = dx / gap;
+                        let ny = dy / gap;
+                        vehicles[i].position.x += nx * push;
+                        vehicles[i].position.y += ny * push;
+                        vehicles[j].position.x -= nx * push;
+                        vehicles[j].position.y -= ny * push;
+                    } else {
+                        let nx = vehicles[i].heading_rad.cos();
+                        let ny = vehicles[i].heading_rad.sin();
+                        vehicles[j].position.x -= min_gap * nx;
+                        vehicles[j].position.y -= min_gap * ny;
+                    }
+                }
+            }
+        }
+
+        if !any_pushed {
+            break;
+        }
+    }
+}
+
 /// Move vehicle along its lane path polyline for this frame.
 pub fn advance_along_path(vehicle: &mut Vehicle, model: &IntersectionModel, dt: f32) {
     step_velocity_toward_command(vehicle, dt);
@@ -523,6 +577,7 @@ mod tests {
         let lid = lane_id(Cardinal::South, Route::Straight);
         let lane = model.lane(lid).unwrap();
         let mut vehicle = spawn_vehicle(VehicleId(id), lane, speed);
+        vehicle.nominal_velocity = speed;
         vehicle.commanded_velocity = speed;
         vehicle.velocity = speed;
         vehicle.position.y = y;
@@ -562,15 +617,19 @@ mod tests {
 
         let mut leader = spawn_vehicle(VehicleId(1), lane, VelocityLevel::Fast.speed());
         leader.position = Vec2::new(lane.spawn_point.x, 500.0);
+        leader.nominal_velocity = 0.0;
         leader.commanded_velocity = 0.0;
         leader.velocity = 0.0;
 
-        let mut follower = spawn_vehicle(VehicleId(2), lane, VelocityLevel::Fast.speed());
+        let fast_speed = VelocityLevel::Fast.speed();
+        let mut follower = spawn_vehicle(VehicleId(2), lane, fast_speed);
+        follower.nominal_velocity = fast_speed;
+        follower.commanded_velocity = fast_speed;
+        follower.velocity = fast_speed;
         follower.position = Vec2::new(
             lane.spawn_point.x,
             leader.position.y + crate::config::SAFE_DISTANCE * 2.0,
         );
-        let fast_speed = VelocityLevel::Fast.speed();
         let mut saw_slowdown = false;
 
         let mut vehicles = vec![leader, follower];
