@@ -58,12 +58,43 @@ impl SmartController {
 
             match vehicle.state {
                 VehicleState::Approaching if in_zone => self.on_vehicle_enter_zone(vehicle),
-                VehicleState::Managed if !in_zone => vehicle.state = VehicleState::Exiting,
+                VehicleState::Managed if !in_zone => {
+                    vehicle.state = VehicleState::Exiting;
+                    self.entry_sequence.remove(&vehicle.id);
+                }
                 _ => {}
             }
         }
 
         self.schedule_managed_velocities(vehicles);
+    }
+
+    /// True when the scheduler commanded a managed vehicle below its nominal speed (C02 / tests).
+    pub fn managed_scheduler_yielded(vehicles: &[Vehicle]) -> bool {
+        vehicles.iter().any(|vehicle| {
+            vehicle.state == VehicleState::Managed
+                && (vehicle.commanded_velocity + 0.01 < vehicle.nominal_velocity
+                    || vehicle.commanded_velocity < 1.0)
+        })
+    }
+
+    /// True when two managed vehicles are close enough for the scheduler to act (C02 / tests).
+    pub fn managed_vehicles_in_scheduler_range(vehicles: &[Vehicle]) -> bool {
+        let len = vehicles.len();
+        for i in 0..len {
+            if vehicles[i].state != VehicleState::Managed {
+                continue;
+            }
+            for j in (i + 1)..len {
+                if vehicles[j].state != VehicleState::Managed {
+                    continue;
+                }
+                if center_distance(&vehicles[i], &vehicles[j]) < SAFE_DISTANCE * 1.5 {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Command velocities for vehicles inside the managed zone (C02 / REQ-3, REQ-9).
@@ -100,13 +131,11 @@ impl SmartController {
 
                 let seq_i = self.entry_sequence.get(&vehicles[i].id).copied();
                 let seq_j = self.entry_sequence.get(&vehicles[j].id).copied();
-                let (yielder, leader_seq, follower_seq) = match (seq_i, seq_j) {
-                    (Some(a), Some(b)) if a > b => (i, b, a),
-                    (Some(a), Some(b)) => (j, a, b),
+                let yielder = match (seq_i, seq_j) {
+                    (Some(a), Some(b)) if a > b => i,
+                    (Some(a), Some(b)) if a < b => j,
                     _ => continue,
                 };
-
-                let _ = (leader_seq, follower_seq);
                 let target = if gap <= SAFE_DISTANCE {
                     0.0
                 } else {

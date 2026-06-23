@@ -133,9 +133,11 @@ fn crate_smoke_same_approach_follower_slows_behind_stopped_leader() {
 
     let lane_x = spawn.vehicles()[0].position.x;
     spawn.vehicles_mut()[0].position = Vec2::new(lane_x, 500.0);
+    spawn.vehicles_mut()[0].nominal_velocity = 0.0;
     spawn.vehicles_mut()[0].commanded_velocity = 0.0;
     spawn.vehicles_mut()[0].velocity = 0.0;
     spawn.vehicles_mut()[1].position = Vec2::new(lane_x, 500.0 + SAFE_DISTANCE * 2.0);
+    spawn.vehicles_mut()[1].nominal_velocity = fast_speed;
     spawn.vehicles_mut()[1].commanded_velocity = fast_speed;
     spawn.vehicles_mut()[1].velocity = fast_speed;
 
@@ -289,9 +291,18 @@ fn crate_smoke_cross_traffic_scheduler_avoids_overlap() {
         .expect("east spawn");
 
     let collision_threshold = VEHICLE_LENGTH * 0.9;
+    let mut saw_scheduler_yield = false;
+    let mut saw_scheduler_range = false;
 
     for _ in 0..1200 {
         smart.update(spawn.vehicles_mut(), &model, FIXED_TIMESTEP_SECS);
+        let vehicles = spawn.vehicles();
+        if SmartController::managed_vehicles_in_scheduler_range(vehicles) {
+            saw_scheduler_range = true;
+        }
+        if SmartController::managed_scheduler_yielded(vehicles) {
+            saw_scheduler_yield = true;
+        }
         let _ = spawn.update(&model, FIXED_TIMESTEP_SECS);
 
         let vehicles = spawn.vehicles();
@@ -311,6 +322,11 @@ fn crate_smoke_cross_traffic_scheduler_avoids_overlap() {
             break;
         }
     }
+
+    assert!(
+        !saw_scheduler_range || saw_scheduler_yield,
+        "cross-traffic scheduler must command yield when managed vehicles are in range"
+    );
 }
 
 mod audit_sim {
@@ -327,9 +343,18 @@ mod audit_sim {
     ) {
         let mut smart = SmartController::new();
         let collision_threshold = VEHICLE_LENGTH * 0.9;
+        let mut saw_scheduler_yield = false;
+        let mut saw_scheduler_range = false;
 
         for _ in 0..max_frames {
             smart.update(spawn.vehicles_mut(), model, FIXED_TIMESTEP_SECS);
+            let vehicles = spawn.vehicles();
+            if SmartController::managed_vehicles_in_scheduler_range(vehicles) {
+                saw_scheduler_range = true;
+            }
+            if SmartController::managed_scheduler_yielded(vehicles) {
+                saw_scheduler_yield = true;
+            }
             let _ = spawn.update(model, FIXED_TIMESTEP_SECS);
 
             let vehicles = spawn.vehicles();
@@ -348,6 +373,10 @@ mod audit_sim {
             }
 
             if spawn.vehicles().is_empty() {
+                assert!(
+                    !saw_scheduler_range || saw_scheduler_yield,
+                    "C02 scheduler must command yield when managed vehicles are in range"
+                );
                 return;
             }
         }

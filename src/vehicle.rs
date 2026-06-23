@@ -579,15 +579,19 @@ mod tests {
 
         let mut leader = spawn_vehicle(VehicleId(1), lane, VelocityLevel::Fast.speed());
         leader.position = Vec2::new(lane.spawn_point.x, 500.0);
+        leader.nominal_velocity = 0.0;
         leader.commanded_velocity = 0.0;
         leader.velocity = 0.0;
 
-        let mut follower = spawn_vehicle(VehicleId(2), lane, VelocityLevel::Fast.speed());
+        let fast_speed = VelocityLevel::Fast.speed();
+        let mut follower = spawn_vehicle(VehicleId(2), lane, fast_speed);
+        follower.nominal_velocity = fast_speed;
+        follower.commanded_velocity = fast_speed;
+        follower.velocity = fast_speed;
         follower.position = Vec2::new(
             lane.spawn_point.x,
             leader.position.y + crate::config::SAFE_DISTANCE * 2.0,
         );
-        let fast_speed = VelocityLevel::Fast.speed();
         let mut saw_slowdown = false;
 
         let mut vehicles = vec![leader, follower];

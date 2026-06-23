@@ -10,11 +10,23 @@ Implements **smart intersection velocity scheduling** per SDS §6.2. `SmartContr
 
 ## Key Changes
 
-- **`src/smart.rs`**: Conflict graph from path segment intersections in junction zone; FIFO entry priority; `schedule_managed_velocities` for cross-traffic and same-lane managed spacing; 4 unit tests.
+- **`src/smart.rs`**: Conflict graph from path segment intersections in junction zone; FIFO entry priority; `schedule_managed_velocities` for cross-traffic and same-lane managed spacing; `managed_scheduler_yielded` / `managed_vehicles_in_scheduler_range` test hooks; `entry_sequence` cleanup on Managed→Exiting; 4 unit tests.
 - **`src/app.rs`**: Smart `update()` runs before `spawn.update()` so scheduled velocities apply before movement.
 - **`src/spawn.rs`**: Same-lane spawn queue offset (`spawn_position_on_lane`); proximity clamp after movement.
 - **`src/vehicle.rs`**: `clamp_velocity_for_proximity()` — stop and nudge apart when centers within one vehicle length.
-- **`tests/smoke.rs`**: AUD-8–AUD-14 mirror tests (`crate_smoke_audit8` … `audit14`) plus cross-traffic overlap guard.
+- **`tests/smoke.rs`**: AUD-8–AUD-14 mirror tests assert scheduler yield when managed vehicles are in range (not only proximity-clamp overlap guard); follow-distance smoke fixes explicit `nominal_velocity` on stopped-leader scenarios.
+
+## Review response (PR #13 — software-sappho)
+
+| Finding | Action |
+|---------|--------|
+| **Major 1** — SDS §13.1 missing C02 cross-track footprint | Updated `docs/SDS.md` §13.1 for `app.rs`, `spawn.rs`, `vehicle.rs`, `smart.rs` |
+| **Major 2** — AUD smoke tests pass via clamp backstop only | `audit_sim::run_until_all_exited` tracks `managed_vehicles_in_scheduler_range` + `managed_scheduler_yielded` after `smart.update()` |
+| **Major 3** — Follow-distance tests vacuous (`VehicleId(2)` → Yield nominal) | Set explicit `nominal_velocity` on follower; leader `nominal_velocity = 0` so enforce does not restore cruise speed |
+| **Minor 4** — `entry_sequence` leak on exit | `entry_sequence.remove` on Managed→Exiting |
+| **Minor 5** — `detect_close_call` same-lane only | Deferred to C03/C04 (unchanged) |
+| **Minor 6** — `VelocityLevel` ownership vs B03 | Documented in SDS §13.1 `vehicle.rs` row |
+| **Nit 7** — Dead bindings in `schedule_managed_velocities` | Simplified FIFO `yielder` match arms |
 
 ## Cross-track edits (announced per SDS §13.1)
 
