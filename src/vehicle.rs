@@ -373,9 +373,8 @@ mod tests {
 
     #[test]
     fn faster_commanded_velocity_drives_strictly_greater_distance() {
-        // Test (b) — B03: proves commanded_velocity is wired into motion, not just stored.
-        // The reconcile line `velocity = commanded_velocity` in integrate_physics must fire,
-        // causing the Fast vehicle to cover more ground than the Yield vehicle in equal time.
+        // B03: proves commanded_velocity drives motion via integrate_physics (B05 ramps
+        // velocity toward command when they differ; at spawn they are equal).
         let mut yield_v = make_vehicle(1, VelocityLevel::Yield.speed());
         let mut fast_v = make_vehicle(2, VelocityLevel::Fast.speed());
 
@@ -743,14 +742,56 @@ mod tests {
     }
 
     #[test]
-    fn motion_profile_exposes_three_distinct_deceleration_scales() {
-        let scales: std::collections::HashSet<u32> = (0..12)
+    fn different_vehicles_use_different_acceleration_rates() {
+        let dt = crate::config::FIXED_TIMESTEP_SECS;
+        let target = VelocityLevel::Fast.speed();
+
+        let mut quicker = make_vehicle(0, target);
+        quicker.velocity = 0.0;
+        quicker.commanded_velocity = target;
+
+        let mut slower = make_vehicle(2, target);
+        slower.velocity = 0.0;
+        slower.commanded_velocity = target;
+
+        step_velocity_toward_command(&mut quicker, dt);
+        step_velocity_toward_command(&mut slower, dt);
+
+        assert!(
+            quicker.velocity > slower.velocity,
+            "VehicleId(0) should accelerate faster than VehicleId(2) (REQ-B3)"
+        );
+        assert!(quicker.velocity > 0.0 && slower.velocity > 0.0);
+        assert!(
+            quicker.velocity < target && slower.velocity < target,
+            "one frame should not snap to target speed"
+        );
+    }
+
+    #[test]
+    fn motion_profile_exposes_three_distinct_rate_scales() {
+        let accel_scales: std::collections::HashSet<u32> = (0..12)
+            .map(|id| {
+                let (accel, _) = motion_profile(VehicleId(id));
+                (accel * 1000.0) as u32
+            })
+            .collect();
+        let decel_scales: std::collections::HashSet<u32> = (0..12)
             .map(|id| {
                 let (_, decel) = motion_profile(VehicleId(id));
                 (decel * 1000.0) as u32
             })
             .collect();
-        assert_eq!(scales.len(), 3, "expected three distinct decel profiles");
+        assert_eq!(
+            accel_scales.len(),
+            3,
+            "expected three distinct accel profiles"
+        );
+        assert_eq!(
+            decel_scales.len(),
+            3,
+            "expected three distinct decel profiles"
+        );
     }
 
     #[test]
