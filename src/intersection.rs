@@ -197,9 +197,6 @@ pub fn attach_paths(model: &mut IntersectionModel, paths: LanePathMap) {
     }
 }
 
-const ARC_SEGMENTS: usize = 12;
-const RIGHT_TURN_RADIUS: f32 = LANE_WIDTH * 1.25;
-const LEFT_TURN_RADIUS: f32 = LANE_WIDTH * 2.5;
 const OFF_SCREEN_MARGIN: f32 = 64.0;
 
 fn off_screen_west(y: f32) -> Vec2 {
@@ -218,239 +215,11 @@ fn off_screen_south(x: f32) -> Vec2 {
     Vec2::new(x, WINDOW_HEIGHT as f32 + OFF_SCREEN_MARGIN)
 }
 
-/// Sample a circular arc (angles in radians, SDL +x east / +y south).
-fn arc_points(
-    center: Vec2,
-    radius: f32,
-    start_angle: f32,
-    end_angle: f32,
-    segments: usize,
-) -> Vec<Vec2> {
-    let mut points = Vec::with_capacity(segments + 1);
-    for i in 0..=segments {
-        let t = i as f32 / segments as f32;
-        let angle = start_angle + (end_angle - start_angle) * t;
-        points.push(Vec2::new(
-            center.x + radius * angle.cos(),
-            center.y + radius * angle.sin(),
-        ));
-    }
-    points
-}
-
-fn append_point(path: &mut Vec<Vec2>, point: Vec2) {
-    if path
-        .last()
-        .is_some_and(|last| (last.x - point.x).abs() < 0.01 && (last.y - point.y).abs() < 0.01)
-    {
-        return;
-    }
-    path.push(point);
-}
-
-#[allow(dead_code)]
-fn append_arc(path: &mut Vec<Vec2>, center: Vec2, radius: f32, start_angle: f32, end_angle: f32) {
-    let mut sweep = end_angle - start_angle;
-    while sweep > std::f32::consts::PI {
-        sweep -= 2.0 * std::f32::consts::PI;
-    }
-    while sweep < -std::f32::consts::PI {
-        sweep += 2.0 * std::f32::consts::PI;
-    }
-    append_arc_sweep(path, center, radius, start_angle, sweep);
-}
-
-/// Append a circular arc with an explicit sweep (no shortest-path flip).
-fn append_arc_sweep(path: &mut Vec<Vec2>, center: Vec2, radius: f32, start_angle: f32, sweep: f32) {
-    let end_angle = start_angle + sweep;
-    for (i, point) in arc_points(center, radius, start_angle, end_angle, ARC_SEGMENTS)
-        .iter()
-        .enumerate()
-    {
-        if i == 0 {
-            continue;
-        }
-        append_point(path, *point);
-    }
-}
-
-struct TurnArc {
-    center: Vec2,
-    radius: f32,
-    start_angle: f32,
-    sweep: f32,
-}
-
-/// Finish a turn path with an axial exit leg (only moves forward toward off-screen).
-fn finish_vertical_exit(path: &mut Vec<Vec2>, exit_y: f32, off_screen: Vec2) {
-    let arc_end = *path.last().expect("arc end");
-    if (arc_end.y - exit_y).abs() > 0.01 {
-        let toward_off = off_screen.y - arc_end.y;
-        let toward_lane = exit_y - arc_end.y;
-        if toward_lane.abs() < 0.01
-            || toward_off.abs() < 0.01
-            || toward_lane.signum() == toward_off.signum()
-        {
-            append_point(path, Vec2::new(arc_end.x, exit_y));
-        }
-    }
-    append_point(path, off_screen);
-}
-
-fn finish_horizontal_exit(path: &mut Vec<Vec2>, exit_x: f32, off_screen: Vec2) {
-    let arc_end = *path.last().expect("arc end");
-    if (arc_end.x - exit_x).abs() > 0.01 {
-        let toward_off = off_screen.x - arc_end.x;
-        let toward_lane = exit_x - arc_end.x;
-        if toward_lane.abs() < 0.01
-            || toward_off.abs() < 0.01
-            || toward_lane.signum() == toward_off.signum()
-        {
-            append_point(path, Vec2::new(exit_x, arc_end.y));
-        }
-    }
-    append_point(path, off_screen);
-}
-
-/// North/South inbound: axial approach, arc, axial exit along constant y.
-fn vertical_approach_turn_path(
-    spawn: Vec2,
-    lane_x: f32,
-    junction_edge_y: f32,
-    turn_entry_y: f32,
-    arc: TurnArc,
-    exit_lane_y: f32,
-    exit_off_screen: Vec2,
-) -> Vec<Vec2> {
-    let mut path = vec![spawn];
-    append_point(&mut path, Vec2::new(lane_x, junction_edge_y));
-    append_point(&mut path, Vec2::new(lane_x, turn_entry_y));
-    append_arc_sweep(
-        &mut path,
-        arc.center,
-        arc.radius,
-        arc.start_angle,
-        arc.sweep,
-    );
-    finish_vertical_exit(&mut path, exit_lane_y, exit_off_screen);
-    path
-}
-
-/// East/West inbound: axial approach, arc, axial exit along constant x.
-fn horizontal_approach_turn_path(
-    spawn: Vec2,
-    lane_y: f32,
-    junction_edge_x: f32,
-    turn_entry_x: f32,
-    arc: TurnArc,
-    exit_lane_x: f32,
-    exit_off_screen: Vec2,
-) -> Vec<Vec2> {
-    let mut path = vec![spawn];
-    append_point(&mut path, Vec2::new(junction_edge_x, lane_y));
-    append_point(&mut path, Vec2::new(turn_entry_x, lane_y));
-    append_arc_sweep(
-        &mut path,
-        arc.center,
-        arc.radius,
-        arc.start_angle,
-        arc.sweep,
-    );
-    finish_horizontal_exit(&mut path, exit_lane_x, exit_off_screen);
-    path
-}
-
-/// North left (N3): south into junction, east across interior, quarter arc to eastbound exit.
-fn build_north_left_path(
-    spawn: Vec2,
-    lane_x: f32,
-    jy_n: f32,
-    _jy_s: f32,
-    exit_y: f32,
-) -> Vec<Vec2> {
-    let l = LEFT_TURN_RADIUS;
-    let center = Vec2::new(lane_x + l, exit_y);
-    let mut path = vec![spawn];
-    append_point(&mut path, Vec2::new(lane_x, jy_n));
-    append_point(&mut path, Vec2::new(lane_x, exit_y + l));
-    append_point(&mut path, Vec2::new(lane_x + l, exit_y + l));
-    append_arc_sweep(
-        &mut path,
-        center,
-        l,
-        std::f32::consts::FRAC_PI_2,
-        std::f32::consts::FRAC_PI_2,
-    );
-    finish_vertical_exit(&mut path, exit_y, off_screen_east(exit_y));
-    path
-}
-
-/// South left (S3): north toward junction, short east interior, quarter arc to westbound exit.
-fn build_south_left_path(spawn: Vec2, lane_x: f32, jy_s: f32, exit_y: f32) -> Vec<Vec2> {
-    let l = LEFT_TURN_RADIUS;
-    let center = Vec2::new(lane_x - l, exit_y);
-    let mut path = vec![spawn];
-    append_point(&mut path, Vec2::new(lane_x, jy_s));
-    append_point(&mut path, Vec2::new(lane_x, exit_y + l));
-    append_point(&mut path, Vec2::new(lane_x - l, exit_y + l));
-    append_arc_sweep(
-        &mut path,
-        center,
-        l,
-        std::f32::consts::FRAC_PI_2,
-        std::f32::consts::FRAC_PI_2,
-    );
-    finish_vertical_exit(&mut path, exit_y, off_screen_west(exit_y));
-    path
-}
-
-/// East left (E3): west into junction, south along interior, quarter arc to southbound exit.
-fn build_east_left_path(spawn: Vec2, lane_y: f32, jx_e: f32, jy_s: f32, exit_x: f32) -> Vec<Vec2> {
-    let l = LEFT_TURN_RADIUS;
-    let center = Vec2::new(exit_x - l, jy_s + l);
-    let mut path = vec![spawn];
-    append_point(&mut path, Vec2::new(jx_e, lane_y));
-    append_point(&mut path, Vec2::new(exit_x - l, lane_y));
-    append_point(&mut path, Vec2::new(exit_x - l, jy_s));
-    append_arc_sweep(
-        &mut path,
-        center,
-        l,
-        -std::f32::consts::FRAC_PI_2,
-        std::f32::consts::FRAC_PI_2,
-    );
-    finish_horizontal_exit(&mut path, exit_x, off_screen_south(exit_x));
-    path
-}
-
-/// West left (W3): east into junction, north to arc tangent, quarter arc to northbound exit.
-fn build_west_left_path(spawn: Vec2, lane_y: f32, jx_w: f32, jy_n: f32, exit_x: f32) -> Vec<Vec2> {
-    let l = LEFT_TURN_RADIUS;
-    let center = Vec2::new(exit_x + l, jy_n);
-    let mut path = vec![spawn];
-    append_point(&mut path, Vec2::new(jx_w, lane_y));
-    append_point(&mut path, Vec2::new(exit_x + l, lane_y));
-    append_point(&mut path, Vec2::new(exit_x + l, jy_n + l));
-    append_arc_sweep(
-        &mut path,
-        center,
-        l,
-        std::f32::consts::FRAC_PI_2,
-        std::f32::consts::FRAC_PI_2,
-    );
-    finish_horizontal_exit(&mut path, exit_x, off_screen_north(exit_x));
-    path
-}
-
-fn build_straight_path(
-    spawn: Vec2,
-    junction_near: Vec2,
-    junction_far: Vec2,
-    off_screen: Vec2,
-) -> Vec<Vec2> {
-    vec![spawn, junction_near, junction_far, off_screen]
-}
-
+/// Four-point lane polyline: spawn → junction entry → exit lane → off-screen.
+///
+/// Turn geometry matches `iana/B05`: axial approach, corner connector into the
+/// perpendicular outbound lane, then an axial exit leg. Exit coordinates use
+/// `outbound_lane_line` so paths stay aligned with the six-lane arm layout.
 fn build_all_lane_paths() -> LanePathMap {
     let mut map = HashMap::with_capacity(12);
 
@@ -472,7 +241,6 @@ fn build_all_lane_paths() -> LanePathMap {
     let w_s_y = spawn_point_for(Cardinal::West, Route::Straight).y;
     let w_l_y = spawn_point_for(Cardinal::West, Route::Left).y;
 
-    // Outbound exit lines (destination arm, matching route digit).
     let west_out_r = outbound_lane_line(Cardinal::West, Route::Right);
     let west_out_l = outbound_lane_line(Cardinal::West, Route::Left);
     let east_out_r = outbound_lane_line(Cardinal::East, Route::Right);
@@ -482,166 +250,120 @@ fn build_all_lane_paths() -> LanePathMap {
     let south_out_r = outbound_lane_line(Cardinal::South, Route::Right);
     let south_out_l = outbound_lane_line(Cardinal::South, Route::Left);
 
-    let pi = std::f32::consts::PI;
-    let r = RIGHT_TURN_RADIUS;
-
     // North approach (southbound inbound)
-    // N1 → west outbound (W1 stripe / lane 6 top-west outbound)
     map.insert(
         lane_id(Cardinal::North, Route::Right),
-        vertical_approach_turn_path(
+        vec![
             spawn_point_for(Cardinal::North, Route::Right),
-            n_r_x,
-            jy_n,
-            west_out_r + r,
-            TurnArc {
-                center: Vec2::new(n_r_x - r, west_out_r + r),
-                radius: r,
-                start_angle: 0.0,
-                sweep: -pi / 2.0,
-            },
-            west_out_r,
+            Vec2::new(n_r_x, jy_n),
+            Vec2::new(jx_w, west_out_r),
             off_screen_west(west_out_r),
-        ),
+        ],
     );
     map.insert(
         lane_id(Cardinal::North, Route::Straight),
-        build_straight_path(
+        vec![
             spawn_point_for(Cardinal::North, Route::Straight),
             Vec2::new(n_s_x, jy_n),
             Vec2::new(n_s_x, jy_s),
             off_screen_south(n_s_x),
-        ),
+        ],
     );
-    // N3 → east outbound (E3 stripe / lane 4 east outbound)
     map.insert(
         lane_id(Cardinal::North, Route::Left),
-        build_north_left_path(
+        vec![
             spawn_point_for(Cardinal::North, Route::Left),
-            n_l_x,
-            jy_n,
-            jy_s,
-            east_out_l,
-        ),
+            Vec2::new(n_l_x, jy_n),
+            Vec2::new(jx_e, east_out_l),
+            off_screen_east(east_out_l),
+        ],
     );
 
     // South approach (northbound inbound)
-    // S1 → east outbound (W1 stripe / lane 6 east outbound)
     map.insert(
         lane_id(Cardinal::South, Route::Right),
-        vertical_approach_turn_path(
+        vec![
             spawn_point_for(Cardinal::South, Route::Right),
-            s_r_x,
-            jy_s,
-            east_out_r - r,
-            TurnArc {
-                center: Vec2::new(s_r_x + r, east_out_r - r),
-                radius: r,
-                start_angle: pi,
-                sweep: -pi / 2.0,
-            },
-            east_out_r,
+            Vec2::new(s_r_x, jy_s),
+            Vec2::new(jx_e, east_out_r),
             off_screen_east(east_out_r),
-        ),
+        ],
     );
     map.insert(
         lane_id(Cardinal::South, Route::Straight),
-        build_straight_path(
+        vec![
             spawn_point_for(Cardinal::South, Route::Straight),
             Vec2::new(s_s_x, jy_s),
             Vec2::new(s_s_x, jy_n),
             off_screen_north(s_s_x),
-        ),
+        ],
     );
-    // S3 → west outbound (E3 stripe / lane 4 west outbound)
     map.insert(
         lane_id(Cardinal::South, Route::Left),
-        build_south_left_path(
+        vec![
             spawn_point_for(Cardinal::South, Route::Left),
-            s_l_x,
-            jy_s,
-            west_out_l,
-        ),
+            Vec2::new(s_l_x, jy_s),
+            Vec2::new(jx_w, west_out_l),
+            off_screen_west(west_out_l),
+        ],
     );
 
     // East approach (westbound inbound)
-    // E1 → north outbound (S1 stripe / lane 6 north outbound)
     map.insert(
         lane_id(Cardinal::East, Route::Right),
-        horizontal_approach_turn_path(
+        vec![
             spawn_point_for(Cardinal::East, Route::Right),
-            e_r_y,
-            jx_e,
-            north_out_r - r,
-            TurnArc {
-                center: Vec2::new(north_out_r - r, e_r_y - r),
-                radius: r,
-                start_angle: std::f32::consts::FRAC_PI_2,
-                sweep: std::f32::consts::FRAC_PI_2,
-            },
-            north_out_r,
+            Vec2::new(jx_e, e_r_y),
+            Vec2::new(north_out_r, jy_n),
             off_screen_north(north_out_r),
-        ),
+        ],
     );
     map.insert(
         lane_id(Cardinal::East, Route::Straight),
-        build_straight_path(
+        vec![
             spawn_point_for(Cardinal::East, Route::Straight),
             Vec2::new(jx_e, e_s_y),
             Vec2::new(jx_w, e_s_y),
             off_screen_west(e_s_y),
-        ),
+        ],
     );
-    // E3 → south outbound (N3 stripe / lane 4 south outbound)
     map.insert(
         lane_id(Cardinal::East, Route::Left),
-        build_east_left_path(
+        vec![
             spawn_point_for(Cardinal::East, Route::Left),
-            e_l_y,
-            jx_e,
-            jy_s,
-            south_out_l,
-        ),
+            Vec2::new(jx_e, e_l_y),
+            Vec2::new(south_out_l, jy_s),
+            off_screen_south(south_out_l),
+        ],
     );
 
     // West approach (eastbound inbound)
-    // W1 → south outbound (N1 stripe / lane 6 south outbound)
     map.insert(
         lane_id(Cardinal::West, Route::Right),
-        horizontal_approach_turn_path(
+        vec![
             spawn_point_for(Cardinal::West, Route::Right),
-            w_r_y,
-            jx_w,
-            south_out_r + r,
-            TurnArc {
-                center: Vec2::new(south_out_r + r, w_r_y - r),
-                radius: r,
-                start_angle: std::f32::consts::FRAC_PI_2,
-                sweep: std::f32::consts::FRAC_PI_2,
-            },
-            south_out_r,
+            Vec2::new(jx_w, w_r_y),
+            Vec2::new(south_out_r, jy_s),
             off_screen_south(south_out_r),
-        ),
+        ],
     );
     map.insert(
         lane_id(Cardinal::West, Route::Straight),
-        build_straight_path(
+        vec![
             spawn_point_for(Cardinal::West, Route::Straight),
             Vec2::new(jx_w, w_s_y),
             Vec2::new(jx_e, w_s_y),
             off_screen_east(w_s_y),
-        ),
+        ],
     );
-    // W3 → north outbound (S3 stripe / lane 4 north outbound)
     map.insert(
         lane_id(Cardinal::West, Route::Left),
-        build_west_left_path(
+        vec![
             spawn_point_for(Cardinal::West, Route::Left),
-            w_l_y,
-            jx_w,
-            jy_n,
-            north_out_l,
-        ),
+            Vec2::new(jx_w, w_l_y),
+            Vec2::new(north_out_l, jy_n),
+            off_screen_north(north_out_l),
+        ],
     );
 
     map
@@ -869,7 +591,7 @@ mod tests {
         let w = crate::config::WINDOW_WIDTH as f32;
         let h = crate::config::WINDOW_HEIGHT as f32;
         for lane in &model.lanes {
-            let exit = *lane.path.last().expect("path has exit");
+            let exit = lane.path[3];
             let actual = if exit.x < 0.0 {
                 "WEST"
             } else if exit.x > w {
@@ -890,21 +612,21 @@ mod tests {
         }
     }
 
-    fn path_segment_headings(path: &[Vec2]) -> Vec<f32> {
-        path.windows(2)
-            .map(|w| (w[1].y - w[0].y).atan2(w[1].x - w[0].x))
-            .collect()
-    }
-
-    fn normalize_angle_delta(delta: f32) -> f32 {
-        let mut d = delta;
-        while d > std::f32::consts::PI {
-            d -= 2.0 * std::f32::consts::PI;
+    #[test]
+    fn turning_lane_paths_use_four_waypoints() {
+        let model = IntersectionModel::new();
+        for lane in &model.lanes {
+            if lane.route == Route::Straight {
+                continue;
+            }
+            assert_eq!(
+                lane.path.len(),
+                4,
+                "{:?} {:?} turn path should have four waypoints (B05 style)",
+                lane.approach,
+                lane.route
+            );
         }
-        while d < -std::f32::consts::PI {
-            d += 2.0 * std::f32::consts::PI;
-        }
-        d
     }
 
     #[test]
@@ -1008,74 +730,6 @@ mod tests {
                     "{approach:?} {route:?}: inbound and outbound should be on opposite halves"
                 );
             }
-        }
-    }
-
-    #[test]
-    fn turning_lane_paths_have_no_long_diagonal_segments() {
-        let model = IntersectionModel::new();
-        for lane in &model.lanes {
-            if lane.route == Route::Straight {
-                continue;
-            }
-            assert!(
-                lane.path.len() > 4,
-                "{:?} {:?} turn path should have dense arc waypoints",
-                lane.approach,
-                lane.route
-            );
-            for w in lane.path.windows(2) {
-                let dx = (w[1].x - w[0].x).abs();
-                let dy = (w[1].y - w[0].y).abs();
-                let len = (dx * dx + dy * dy).sqrt();
-                // Turn paths are axial legs + circular arcs; any diagonal connector is a bug.
-                if dx > 1.0 && dy > 1.0 {
-                    assert!(
-                        len < LANE_WIDTH,
-                        "{:?} {:?} has diagonal connector ({:.1}, {:.1}) len {:.1}",
-                        lane.approach,
-                        lane.route,
-                        dx,
-                        dy,
-                        len
-                    );
-                }
-                if len > LANE_WIDTH * 2.0 {
-                    assert!(
-                        dx < 1.0 || dy < 1.0,
-                        "{:?} {:?} has long diagonal segment ({:.1}, {:.1})",
-                        lane.approach,
-                        lane.route,
-                        dx,
-                        dy
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn turning_lane_heading_changes_smoothly_through_arc() {
-        let model = IntersectionModel::new();
-        for lane in &model.lanes {
-            if lane.route == Route::Straight {
-                continue;
-            }
-            let headings = path_segment_headings(&lane.path);
-            // Skip approach-to-arc and arc-to-exit transitions (fillet tangency).
-            let start = 3.min(headings.len().saturating_sub(1));
-            let end = headings.len().saturating_sub(3);
-            let mut max_jump = 0.0_f32;
-            for pair in headings[start..end].windows(2) {
-                max_jump = max_jump.max(normalize_angle_delta(pair[1] - pair[0]).abs());
-            }
-            assert!(
-                max_jump < std::f32::consts::FRAC_PI_2,
-                "{:?} {:?} arc heading jump {:.2} rad too sharp",
-                lane.approach,
-                lane.route,
-                max_jump
-            );
         }
     }
 
