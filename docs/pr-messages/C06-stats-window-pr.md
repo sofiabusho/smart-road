@@ -27,7 +27,7 @@ Implements the **post-session statistics window** per SDS §9 and §13.4 (IF-4: 
 
 ### Automated Checks
 
-- [x] `cargo test` — **86 passed** (70 unit + 12 smoke + 1 manual ignored by default)
+- [x] `cargo test` — **99 passed** (78 unit + 21 smoke + 1 manual ignored by default; 3 B05 follow-distance tests may flake on some hosts)
 - [x] `cargo clippy -- -D warnings` — passes
 - [x] `cargo fmt --check` — passes
 - [x] `cargo build` — succeeds (Windows SDL2 + WSL)
@@ -52,7 +52,7 @@ Implements the **post-session statistics window** per SDS §9 and §13.4 (IF-4: 
 
 ## Artifacts
 
-- **Test output**: `cargo test` — 86 passed (manual AUD-19 run separately with `--ignored`).
+- **Test output**: `cargo test` — 99 passed (manual AUD-19 run separately with `--ignored`).
 - **Lint output**: `cargo clippy -- -D warnings` clean.
 
 ---
