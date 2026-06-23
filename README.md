@@ -47,14 +47,29 @@ python3 scripts/generate_road_assets.py
 
 Layout constants in `src/config.rs` and `scripts/generate_road_assets.py` must stay in sync; rerun the script after changing window size, margins, or lane dimensions.
 
-### SDL2_image (optional, later tickets)
+### Vehicle sprites (A08+)
 
-PNG vehicle sprites (ticket **A07+**) may use the `sdl2` `image` feature. Install when needed:
+Vehicle BMPs live in `assets/vehicles/` (one per approach, eastbound authorship).
+Regenerate Time Fantasy–style placeholders with:
+
+```bash
+python3 scripts/generate_vehicle_sprites.py
+```
+
+**Attribution:** pixel-art style by [Jason Perry (finalbossblues)](https://finalbossblues.itch.io/) — see [assets/vehicles/ATTRIBUTION.md](assets/vehicles/ATTRIBUTION.md). You may replace the shipped BMPs with frames from the free [Pixel Shooter and Towers Asset Pack](https://finalbossblues.itch.io/pixel-shooter-towers-asset-pack) (public domain).
+
+Turn animation (A07) rotates these sprites via SDL `copy_ex` and `heading_rad` from lane path tangents.
+
+### SDL2_image (optional)
+
+To load PNG vehicle sprites directly, enable the `image` feature in `Cargo.toml` and install:
 
 ```bash
 # Ubuntu / Debian
 sudo apt install -y libsdl2-image-dev
 ```
+
+Without SDL2_image, use 32-bit BMP with alpha (default).
 
 ## Build and run
 
