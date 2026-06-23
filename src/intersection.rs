@@ -215,156 +215,206 @@ fn off_screen_south(x: f32) -> Vec2 {
     Vec2::new(x, WINDOW_HEIGHT as f32 + OFF_SCREEN_MARGIN)
 }
 
-/// Four-point lane polyline: spawn → junction entry → exit lane → off-screen.
-///
-/// Turn geometry matches `iana/B05`: axial approach, corner connector into the
-/// perpendicular outbound lane, then an axial exit leg. Exit coordinates use
-/// `outbound_lane_line` so paths stay aligned with the six-lane arm layout.
-fn build_all_lane_paths() -> LanePathMap {
-    let mut map = HashMap::with_capacity(12);
+/// Perpendicular exit arm for a right-hand turn (right or left route).
+pub(crate) fn exit_cardinal_for_turn(approach: Cardinal, route: Route) -> Cardinal {
+    match (approach, route) {
+        (Cardinal::North, Route::Right) => Cardinal::West,
+        (Cardinal::North, Route::Left) => Cardinal::East,
+        (Cardinal::South, Route::Right) => Cardinal::East,
+        (Cardinal::South, Route::Left) => Cardinal::West,
+        (Cardinal::East, Route::Right) => Cardinal::North,
+        (Cardinal::East, Route::Left) => Cardinal::South,
+        (Cardinal::West, Route::Right) => Cardinal::South,
+        (Cardinal::West, Route::Left) => Cardinal::North,
+        (Cardinal::North | Cardinal::South | Cardinal::East | Cardinal::West, Route::Straight) => {
+            unreachable!("straight routes do not turn onto a perpendicular arm")
+        }
+    }
+}
+
+fn off_screen_for_cardinal(cardinal: Cardinal, lane_line: f32) -> Vec2 {
+    match cardinal {
+        Cardinal::West => off_screen_west(lane_line),
+        Cardinal::East => off_screen_east(lane_line),
+        Cardinal::North => off_screen_north(lane_line),
+        Cardinal::South => off_screen_south(lane_line),
+    }
+}
+
+/// Right turn: spawn → junction entry → corner connector → off-screen (4 points).
+fn build_right_turn_path(approach: Cardinal) -> Vec<Vec2> {
+    let spawn = spawn_point_for(approach, Route::Right);
+    let exit = exit_cardinal_for_turn(approach, Route::Right);
+    let outbound = outbound_lane_line(exit, Route::Right);
 
     let jx_w = INTERSECTION_CENTER_X - INTERSECTION_HALF_SIZE;
     let jx_e = INTERSECTION_CENTER_X + INTERSECTION_HALF_SIZE;
     let jy_n = INTERSECTION_CENTER_Y - INTERSECTION_HALF_SIZE;
     let jy_s = INTERSECTION_CENTER_Y + INTERSECTION_HALF_SIZE;
 
-    let n_r_x = spawn_point_for(Cardinal::North, Route::Right).x;
-    let n_s_x = spawn_point_for(Cardinal::North, Route::Straight).x;
-    let n_l_x = spawn_point_for(Cardinal::North, Route::Left).x;
-    let s_r_x = spawn_point_for(Cardinal::South, Route::Right).x;
-    let s_s_x = spawn_point_for(Cardinal::South, Route::Straight).x;
-    let s_l_x = spawn_point_for(Cardinal::South, Route::Left).x;
-    let e_r_y = spawn_point_for(Cardinal::East, Route::Right).y;
-    let e_s_y = spawn_point_for(Cardinal::East, Route::Straight).y;
-    let e_l_y = spawn_point_for(Cardinal::East, Route::Left).y;
-    let w_r_y = spawn_point_for(Cardinal::West, Route::Right).y;
-    let w_s_y = spawn_point_for(Cardinal::West, Route::Straight).y;
-    let w_l_y = spawn_point_for(Cardinal::West, Route::Left).y;
+    let (entry, connector) = match approach {
+        Cardinal::North => {
+            let lane_x = spawn.x;
+            let connector = match exit {
+                Cardinal::West => Vec2::new(jx_w, outbound),
+                Cardinal::East => Vec2::new(jx_e, outbound),
+                Cardinal::North | Cardinal::South => unreachable!(),
+            };
+            (Vec2::new(lane_x, jy_n), connector)
+        }
+        Cardinal::South => {
+            let lane_x = spawn.x;
+            let connector = match exit {
+                Cardinal::West => Vec2::new(jx_w, outbound),
+                Cardinal::East => Vec2::new(jx_e, outbound),
+                Cardinal::North | Cardinal::South => unreachable!(),
+            };
+            (Vec2::new(lane_x, jy_s), connector)
+        }
+        Cardinal::East => {
+            let lane_y = spawn.y;
+            let connector = match exit {
+                Cardinal::North => Vec2::new(outbound, jy_n),
+                Cardinal::South => Vec2::new(outbound, jy_s),
+                Cardinal::East | Cardinal::West => unreachable!(),
+            };
+            (Vec2::new(jx_e, lane_y), connector)
+        }
+        Cardinal::West => {
+            let lane_y = spawn.y;
+            let connector = match exit {
+                Cardinal::North => Vec2::new(outbound, jy_n),
+                Cardinal::South => Vec2::new(outbound, jy_s),
+                Cardinal::East | Cardinal::West => unreachable!(),
+            };
+            (Vec2::new(jx_w, lane_y), connector)
+        }
+    };
 
-    let west_out_r = outbound_lane_line(Cardinal::West, Route::Right);
-    let west_out_l = outbound_lane_line(Cardinal::West, Route::Left);
-    let east_out_r = outbound_lane_line(Cardinal::East, Route::Right);
-    let east_out_l = outbound_lane_line(Cardinal::East, Route::Left);
-    let north_out_r = outbound_lane_line(Cardinal::North, Route::Right);
-    let north_out_l = outbound_lane_line(Cardinal::North, Route::Left);
-    let south_out_r = outbound_lane_line(Cardinal::South, Route::Right);
-    let south_out_l = outbound_lane_line(Cardinal::South, Route::Left);
+    vec![
+        spawn,
+        entry,
+        connector,
+        off_screen_for_cardinal(exit, outbound),
+    ]
+}
 
-    // North approach (southbound inbound)
-    map.insert(
-        lane_id(Cardinal::North, Route::Right),
-        vec![
-            spawn_point_for(Cardinal::North, Route::Right),
-            Vec2::new(n_r_x, jy_n),
-            Vec2::new(jx_w, west_out_r),
-            off_screen_west(west_out_r),
-        ],
-    );
-    map.insert(
-        lane_id(Cardinal::North, Route::Straight),
-        vec![
-            spawn_point_for(Cardinal::North, Route::Straight),
-            Vec2::new(n_s_x, jy_n),
-            Vec2::new(n_s_x, jy_s),
-            off_screen_south(n_s_x),
-        ],
-    );
-    map.insert(
-        lane_id(Cardinal::North, Route::Left),
-        vec![
-            spawn_point_for(Cardinal::North, Route::Left),
-            Vec2::new(n_l_x, jy_n),
-            Vec2::new(jx_e, east_out_l),
-            off_screen_east(east_out_l),
-        ],
-    );
+/// Left turn: spawn → junction entry → interior (axial through junction) → exit lane → off-screen.
+///
+/// Unlike right turns, left turns continue straight through the intersection until they
+/// align with the outbound lane, then turn onto that arm.
+fn build_left_turn_path(approach: Cardinal) -> Vec<Vec2> {
+    let spawn = spawn_point_for(approach, Route::Left);
+    let exit = exit_cardinal_for_turn(approach, Route::Left);
+    let outbound = outbound_lane_line(exit, Route::Left);
 
-    // South approach (northbound inbound)
-    map.insert(
-        lane_id(Cardinal::South, Route::Right),
-        vec![
-            spawn_point_for(Cardinal::South, Route::Right),
-            Vec2::new(s_r_x, jy_s),
-            Vec2::new(jx_e, east_out_r),
-            off_screen_east(east_out_r),
-        ],
-    );
-    map.insert(
-        lane_id(Cardinal::South, Route::Straight),
-        vec![
-            spawn_point_for(Cardinal::South, Route::Straight),
-            Vec2::new(s_s_x, jy_s),
-            Vec2::new(s_s_x, jy_n),
-            off_screen_north(s_s_x),
-        ],
-    );
-    map.insert(
-        lane_id(Cardinal::South, Route::Left),
-        vec![
-            spawn_point_for(Cardinal::South, Route::Left),
-            Vec2::new(s_l_x, jy_s),
-            Vec2::new(jx_w, west_out_l),
-            off_screen_west(west_out_l),
-        ],
-    );
+    let jx_w = INTERSECTION_CENTER_X - INTERSECTION_HALF_SIZE;
+    let jx_e = INTERSECTION_CENTER_X + INTERSECTION_HALF_SIZE;
+    let jy_n = INTERSECTION_CENTER_Y - INTERSECTION_HALF_SIZE;
+    let jy_s = INTERSECTION_CENTER_Y + INTERSECTION_HALF_SIZE;
 
-    // East approach (westbound inbound)
-    map.insert(
-        lane_id(Cardinal::East, Route::Right),
-        vec![
-            spawn_point_for(Cardinal::East, Route::Right),
-            Vec2::new(jx_e, e_r_y),
-            Vec2::new(north_out_r, jy_n),
-            off_screen_north(north_out_r),
-        ],
-    );
-    map.insert(
-        lane_id(Cardinal::East, Route::Straight),
-        vec![
-            spawn_point_for(Cardinal::East, Route::Straight),
-            Vec2::new(jx_e, e_s_y),
-            Vec2::new(jx_w, e_s_y),
-            off_screen_west(e_s_y),
-        ],
-    );
-    map.insert(
-        lane_id(Cardinal::East, Route::Left),
-        vec![
-            spawn_point_for(Cardinal::East, Route::Left),
-            Vec2::new(jx_e, e_l_y),
-            Vec2::new(south_out_l, jy_s),
-            off_screen_south(south_out_l),
-        ],
-    );
+    match approach {
+        Cardinal::North => {
+            let lane_x = spawn.x;
+            vec![
+                spawn,
+                Vec2::new(lane_x, jy_n),
+                Vec2::new(lane_x, outbound),
+                Vec2::new(jx_e, outbound),
+                off_screen_east(outbound),
+            ]
+        }
+        Cardinal::South => {
+            let lane_x = spawn.x;
+            vec![
+                spawn,
+                Vec2::new(lane_x, jy_s),
+                Vec2::new(lane_x, outbound),
+                Vec2::new(jx_w, outbound),
+                off_screen_west(outbound),
+            ]
+        }
+        Cardinal::East => {
+            let lane_y = spawn.y;
+            vec![
+                spawn,
+                Vec2::new(jx_e, lane_y),
+                Vec2::new(outbound, lane_y),
+                Vec2::new(outbound, jy_s),
+                off_screen_south(outbound),
+            ]
+        }
+        Cardinal::West => {
+            let lane_y = spawn.y;
+            vec![
+                spawn,
+                Vec2::new(jx_w, lane_y),
+                Vec2::new(outbound, lane_y),
+                Vec2::new(outbound, jy_n),
+                off_screen_north(outbound),
+            ]
+        }
+    }
+}
 
-    // West approach (eastbound inbound)
-    map.insert(
-        lane_id(Cardinal::West, Route::Right),
-        vec![
-            spawn_point_for(Cardinal::West, Route::Right),
-            Vec2::new(jx_w, w_r_y),
-            Vec2::new(south_out_r, jy_s),
-            off_screen_south(south_out_r),
+fn build_turn_path(approach: Cardinal, route: Route) -> Vec<Vec2> {
+    match route {
+        Route::Right => build_right_turn_path(approach),
+        Route::Left => build_left_turn_path(approach),
+        Route::Straight => unreachable!("straight routes use build_straight_path"),
+    }
+}
+
+fn build_straight_path(approach: Cardinal) -> Vec<Vec2> {
+    let spawn = spawn_point_for(approach, Route::Straight);
+    let lane_x = spawn.x;
+    let lane_y = spawn.y;
+
+    let jx_w = INTERSECTION_CENTER_X - INTERSECTION_HALF_SIZE;
+    let jx_e = INTERSECTION_CENTER_X + INTERSECTION_HALF_SIZE;
+    let jy_n = INTERSECTION_CENTER_Y - INTERSECTION_HALF_SIZE;
+    let jy_s = INTERSECTION_CENTER_Y + INTERSECTION_HALF_SIZE;
+
+    match approach {
+        Cardinal::North => vec![
+            spawn,
+            Vec2::new(lane_x, jy_n),
+            Vec2::new(lane_x, jy_s),
+            off_screen_south(lane_x),
         ],
-    );
-    map.insert(
-        lane_id(Cardinal::West, Route::Straight),
-        vec![
-            spawn_point_for(Cardinal::West, Route::Straight),
-            Vec2::new(jx_w, w_s_y),
-            Vec2::new(jx_e, w_s_y),
-            off_screen_east(w_s_y),
+        Cardinal::South => vec![
+            spawn,
+            Vec2::new(lane_x, jy_s),
+            Vec2::new(lane_x, jy_n),
+            off_screen_north(lane_x),
         ],
-    );
-    map.insert(
-        lane_id(Cardinal::West, Route::Left),
-        vec![
-            spawn_point_for(Cardinal::West, Route::Left),
-            Vec2::new(jx_w, w_l_y),
-            Vec2::new(north_out_l, jy_n),
-            off_screen_north(north_out_l),
+        Cardinal::East => vec![
+            spawn,
+            Vec2::new(jx_e, lane_y),
+            Vec2::new(jx_w, lane_y),
+            off_screen_west(lane_y),
         ],
-    );
+        Cardinal::West => vec![
+            spawn,
+            Vec2::new(jx_w, lane_y),
+            Vec2::new(jx_e, lane_y),
+            off_screen_east(lane_y),
+        ],
+    }
+}
+
+fn build_all_lane_paths() -> LanePathMap {
+    let mut map = HashMap::with_capacity(12);
+
+    for approach in Cardinal::ALL {
+        for route in Route::ALL {
+            let path = match route {
+                Route::Right | Route::Left => build_turn_path(approach, route),
+                Route::Straight => build_straight_path(approach),
+            };
+            map.insert(lane_id(approach, route), path);
+        }
+    }
 
     map
 }
@@ -569,29 +619,11 @@ mod tests {
     #[test]
     fn lane_exit_direction_matches_route() {
         // Classic RHT: right/left turns exit the perpendicular arm.
-        //   N1→WEST  N3→EAST   S1→EAST   S3→WEST
-        //   E1→NORTH E3→SOUTH  W1→SOUTH  W3→NORTH
         let model = IntersectionModel::new();
-        let expected_exit = |approach: Cardinal, route: Route| -> &'static str {
-            match (approach, route) {
-                (Cardinal::North, Route::Right) => "WEST",
-                (Cardinal::North, Route::Straight) => "SOUTH",
-                (Cardinal::North, Route::Left) => "EAST",
-                (Cardinal::South, Route::Right) => "EAST",
-                (Cardinal::South, Route::Straight) => "NORTH",
-                (Cardinal::South, Route::Left) => "WEST",
-                (Cardinal::East, Route::Right) => "NORTH",
-                (Cardinal::East, Route::Straight) => "WEST",
-                (Cardinal::East, Route::Left) => "SOUTH",
-                (Cardinal::West, Route::Right) => "SOUTH",
-                (Cardinal::West, Route::Straight) => "EAST",
-                (Cardinal::West, Route::Left) => "NORTH",
-            }
-        };
         let w = crate::config::WINDOW_WIDTH as f32;
         let h = crate::config::WINDOW_HEIGHT as f32;
         for lane in &model.lanes {
-            let exit = lane.path[3];
+            let exit = *lane.path.last().expect("path has exit");
             let actual = if exit.x < 0.0 {
                 "WEST"
             } else if exit.x > w {
@@ -603,7 +635,20 @@ mod tests {
             } else {
                 "NONE (not off-screen)"
             };
-            let expected = expected_exit(lane.approach, lane.route);
+            let expected = match lane.route {
+                Route::Straight => match lane.approach {
+                    Cardinal::North => "SOUTH",
+                    Cardinal::South => "NORTH",
+                    Cardinal::East => "WEST",
+                    Cardinal::West => "EAST",
+                },
+                Route::Right | Route::Left => match exit_cardinal_for_turn(lane.approach, lane.route) {
+                    Cardinal::West => "WEST",
+                    Cardinal::East => "EAST",
+                    Cardinal::North => "NORTH",
+                    Cardinal::South => "SOUTH",
+                },
+            };
             assert_eq!(
                 actual, expected,
                 "{:?} {:?}: expected exit {} but last waypoint = ({}, {})",
@@ -613,16 +658,18 @@ mod tests {
     }
 
     #[test]
-    fn turning_lane_paths_use_four_waypoints() {
+    fn turning_lane_paths_have_expected_waypoint_count() {
         let model = IntersectionModel::new();
         for lane in &model.lanes {
-            if lane.route == Route::Straight {
-                continue;
-            }
+            let expected = match lane.route {
+                Route::Straight => continue,
+                Route::Right => 4,
+                Route::Left => 5,
+            };
             assert_eq!(
                 lane.path.len(),
-                4,
-                "{:?} {:?} turn path should have four waypoints (B05 style)",
+                expected,
+                "{:?} {:?} turn path waypoint count",
                 lane.approach,
                 lane.route
             );
@@ -636,7 +683,12 @@ mod tests {
             if lane.route == Route::Straight {
                 continue;
             }
-            for w in lane.path.windows(2).take(2) {
+            let axial_segments = match lane.route {
+                Route::Right => 2,
+                Route::Left => 3,
+                Route::Straight => unreachable!(),
+            };
+            for w in lane.path.windows(2).take(axial_segments) {
                 let seg_dx = w[1].x - w[0].x;
                 let seg_dy = w[1].y - w[0].y;
                 let along = match lane.approach {
@@ -663,53 +715,28 @@ mod tests {
 
         let before_exit = |lane: &LaneInfo| lane.path[lane.path.len() - 2];
 
-        let n1 = model.lane(lane_id(Cardinal::North, Route::Right)).unwrap();
-        assert!(
-            (before_exit(n1).y - outbound_lane_line(Cardinal::West, Route::Right)).abs() < 1.0,
-            "N1 should exit on west outbound right"
-        );
-
-        let n3 = model.lane(lane_id(Cardinal::North, Route::Left)).unwrap();
-        assert!(
-            (before_exit(n3).y - outbound_lane_line(Cardinal::East, Route::Left)).abs() < 1.0,
-            "N3 should exit on east outbound left"
-        );
-
-        let s1 = model.lane(lane_id(Cardinal::South, Route::Right)).unwrap();
-        assert!(
-            (before_exit(s1).y - outbound_lane_line(Cardinal::East, Route::Right)).abs() < 1.0,
-            "S1 should exit on east outbound right (W1 stripe)"
-        );
-
-        let s3 = model.lane(lane_id(Cardinal::South, Route::Left)).unwrap();
-        assert!(
-            (before_exit(s3).y - outbound_lane_line(Cardinal::West, Route::Left)).abs() < 1.0,
-            "S3 should exit on west outbound left"
-        );
-
-        let e1 = model.lane(lane_id(Cardinal::East, Route::Right)).unwrap();
-        assert!(
-            (before_exit(e1).x - outbound_lane_line(Cardinal::North, Route::Right)).abs() < 1.0,
-            "E1 should exit on north outbound right"
-        );
-
-        let e3 = model.lane(lane_id(Cardinal::East, Route::Left)).unwrap();
-        assert!(
-            (before_exit(e3).x - outbound_lane_line(Cardinal::South, Route::Left)).abs() < 1.0,
-            "E3 should exit on south outbound left"
-        );
-
-        let w1 = model.lane(lane_id(Cardinal::West, Route::Right)).unwrap();
-        assert!(
-            (before_exit(w1).x - outbound_lane_line(Cardinal::South, Route::Right)).abs() < 1.0,
-            "W1 should exit on south outbound right"
-        );
-
-        let w3 = model.lane(lane_id(Cardinal::West, Route::Left)).unwrap();
-        assert!(
-            (before_exit(w3).x - outbound_lane_line(Cardinal::North, Route::Left)).abs() < 1.0,
-            "W3 should exit on north outbound left"
-        );
+        for lane in &model.lanes {
+            if lane.route == Route::Straight {
+                continue;
+            }
+            let exit = exit_cardinal_for_turn(lane.approach, lane.route);
+            let outbound = outbound_lane_line(exit, lane.route);
+            let connector = before_exit(lane);
+            let aligned = match lane.approach {
+                Cardinal::North | Cardinal::South => (connector.y - outbound).abs() < 1.0,
+                Cardinal::East | Cardinal::West => (connector.x - outbound).abs() < 1.0,
+            };
+            assert!(
+                aligned,
+                "{:?} {:?} should exit on {:?} outbound {:?}, connector ({:.1}, {:.1})",
+                lane.approach,
+                lane.route,
+                exit,
+                lane.route,
+                connector.x,
+                connector.y
+            );
+        }
     }
 
     #[test]
