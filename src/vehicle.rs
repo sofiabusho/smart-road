@@ -540,6 +540,7 @@ mod tests {
         let lid = lane_id(Cardinal::South, Route::Straight);
         let lane = model.lane(lid).unwrap();
         let mut vehicle = spawn_vehicle(VehicleId(id), lane, speed);
+        vehicle.nominal_velocity = speed;
         vehicle.commanded_velocity = speed;
         vehicle.velocity = speed;
         vehicle.position.y = y;

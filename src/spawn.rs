@@ -6,6 +6,9 @@ use std::time::{Duration, Instant};
 use crate::intersection::{Cardinal, IntersectionModel, LaneId, Route, Vec2};
 use crate::vehicle::{spawn_vehicle, Vehicle, VehicleId, VehicleState};
 
+/// Maximum vehicles allowed on a single lane before new spawns are blocked (AUD-17).
+const LANE_CAPACITY: usize = 8;
+
 /// Lightweight PRNG for spawn randomization (no extra crate dependency).
 #[derive(Debug, Clone)]
 struct SpawnRng {
@@ -137,9 +140,18 @@ impl SpawnSystem {
         &mut self.vehicles
     }
 
-    /// Attempt to spawn a vehicle from a request. Returns `None` if cooldown rejects.
+    /// Attempt to spawn a vehicle from a request. Returns `None` if cooldown or congestion rejects.
     pub fn try_spawn(&mut self, req: SpawnRequest, model: &IntersectionModel) -> Option<VehicleId> {
         if !self.cooldown.allows(req.approach) {
+            return None;
+        }
+
+        let queued = self
+            .vehicles
+            .iter()
+            .filter(|v| v.lane_id == req.lane_id && v.state != VehicleState::Done)
+            .count();
+        if queued >= LANE_CAPACITY {
             return None;
         }
 
