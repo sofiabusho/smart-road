@@ -8,7 +8,7 @@
 > - **A/B/C**: Parallel developer tracks (see §2)
 > - **🔗**: Cross-track dependency — external ticket must be ✅ first
 
-Last refreshed: 2026-06-17 (A01–A06, B01–B05, C01, C02, C03, C04, C05, C06, C08 ✅)
+Last refreshed: 2026-06-24 (A01–A08 ✅, B01–B05 ✅, C01–C06 ✅, C08 ✅)
 
 ---
 
@@ -93,7 +93,7 @@ Execution order:
 | A05 | ✅ | **Spawn anti-spam**: per-direction cooldown | S | A04 | REQ-18 · AUD-27 | AUD-27 | A |
 | A06 | ✅ | **`R` random spawn**: continuous random lane/route | S | A04 | REQ-16 · AUD-7 | AUD-7 | A |
 | A07 | ✅ | **Turn animation**: sprite rotation along path tangent | M | A04, B02 🔗 | REQ-11 | Visual check; path alignment with AUD-28 | A |
-| A08 | ⬜ | **Custom assets** *(bonus)* | M | A03 | REQ-B1 · AUD-B2 | AUD-B2 | A |
+| A08 | ✅ | **Custom assets** *(bonus)* | M | A03 | REQ-B1 · AUD-B2 | AUD-B2 | A |
 
 **Intra-track chain**: A01 → A03 → A04 → A05 / A06; A07 after B02 delivers path tangents.
 
@@ -171,7 +171,7 @@ No circular dependencies.
 |------|---------|------------|
 | ~~**Start**~~ | ~~**A01**~~ ✅ · ~~**A02**~~ ✅ · ~~**A03**~~ ✅ · ~~**A04**~~ ✅ · ~~**A05**~~ ✅ · ~~**A06**~~ ✅ | — |
 | **Now** | **A07** (turn animation) | — |
-| Anytime after A03 ✅ | **A08** *(bonus)* | — |
+| Anytime after A03 ✅ | ~~**A08**~~ ✅ *(bonus)* | — |
 
 ### Dev B (Vehicle simulation)
 
@@ -211,7 +211,7 @@ No circular dependencies.
 
 **Pass criteria**:
 
-- **Track A**: A01–A07 ✅ (A08 optional)
+- **Track A**: A01–A08 ✅
 - **Track B**: B01–B04 ✅ (B05 optional)
 - **Track C**: C01–C07 ✅ (C08 optional)
 - All AUD-1–AUD-31 pass
