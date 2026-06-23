@@ -286,7 +286,14 @@ pub fn clamp_velocity_for_proximity(vehicles: &mut [Vehicle]) {
 }
 
 /// Move vehicle along its lane path polyline for this frame.
+///
+/// Path following owns position and heading during route adherence (B02). Crossing metrics
+/// accumulate here so callers do not also run `integrate_physics` in the same tick.
 pub fn advance_along_path(vehicle: &mut Vehicle, model: &IntersectionModel, dt: f32) {
+    if vehicle.state == VehicleState::Done {
+        return;
+    }
+
     step_velocity_toward_command(vehicle, dt);
     let start = vehicle.position;
     let track_crossing =
@@ -303,6 +310,9 @@ pub fn advance_along_path(vehicle: &mut Vehicle, model: &IntersectionModel, dt: 
     };
 
     if vehicle.path_index >= path.len() - 1 {
+        if vehicle.path_index == path.len() - 1 {
+            vehicle.state = VehicleState::Done;
+        }
         if track_crossing {
             vehicle.time_in_crossing += dt;
         }
@@ -345,7 +355,7 @@ pub fn advance_along_path(vehicle: &mut Vehicle, model: &IntersectionModel, dt: 
     let moved_dy = vehicle.position.y - start.y;
     let distance_moved = (moved_dx * moved_dx + moved_dy * moved_dy).sqrt();
 
-    if vehicle.state == VehicleState::Managed || vehicle.state == VehicleState::Exiting {
+    if track_crossing {
         vehicle.time_in_crossing += dt;
         vehicle.distance_in_crossing += distance_moved;
     }
@@ -889,5 +899,39 @@ mod tests {
             vehicle.distance_in_crossing, 0.0,
             "no distance moved when already at terminal waypoint"
         );
+    }
+
+    #[test]
+    fn advance_along_path_turn_exits_perpendicular_arm() {
+        let model = IntersectionModel::new();
+        let dt = crate::config::FIXED_TIMESTEP_SECS;
+        let w = crate::config::WINDOW_WIDTH as f32;
+        let h = crate::config::WINDOW_HEIGHT as f32;
+
+        for route in [Route::Right, Route::Left] {
+            for approach in Cardinal::ALL {
+                let lane = model
+                    .lane(crate::intersection::lane_id(approach, route))
+                    .expect("turn lane");
+                let mut vehicle =
+                    spawn_vehicle(VehicleId(1), lane, crate::config::DEFAULT_SPAWN_VELOCITY);
+
+                for _ in 0..1500 {
+                    advance_along_path(&mut vehicle, &model, dt);
+                }
+
+                let exited = match crate::intersection::exit_cardinal_for_turn(approach, route) {
+                    Cardinal::West => vehicle.position.x < 0.0,
+                    Cardinal::East => vehicle.position.x > w,
+                    Cardinal::North => vehicle.position.y < 0.0,
+                    Cardinal::South => vehicle.position.y > h,
+                };
+                assert!(
+                    exited,
+                    "{approach:?} {route:?} failed to exit off-screen, got ({}, {})",
+                    vehicle.position.x, vehicle.position.y
+                );
+            }
+        }
     }
 }

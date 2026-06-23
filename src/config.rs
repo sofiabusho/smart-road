@@ -31,14 +31,20 @@ pub const FIXED_TIMESTEP_SECS: f32 = 1.0 / TARGET_FPS as f32;
 /// Lane width in world units (pixels at 1:1 scale).
 pub const LANE_WIDTH: f32 = 40.0;
 
-/// Number of lanes per approach (right, straight, left).
+/// Number of inbound route lanes per approach (right, straight, left).
 pub const LANES_PER_APPROACH: u32 = 3;
 
-/// Total road width across all lanes on one approach.
-pub const ROAD_WIDTH: f32 = LANE_WIDTH * LANES_PER_APPROACH as f32;
+/// Lanes per road arm: three inbound + three outbound (one direction each).
+pub const LANES_PER_ARM: u32 = LANES_PER_APPROACH * 2;
+
+/// Width of the three inbound (or outbound) lanes on one side of the arm.
+pub const INBOUND_ROAD_WIDTH: f32 = LANE_WIDTH * LANES_PER_APPROACH as f32;
+
+/// Full road-arm width — six one-direction lanes (3 per side of the center divider).
+pub const ROAD_ARM_WIDTH: f32 = LANE_WIDTH * LANES_PER_ARM as f32;
 
 /// Half-width of the junction box (smart-system zone) in world units.
-pub const INTERSECTION_HALF_SIZE: f32 = ROAD_WIDTH / 2.0;
+pub const INTERSECTION_HALF_SIZE: f32 = ROAD_ARM_WIDTH / 2.0;
 
 /// Distance from window edge to the near end of each approach arm.
 pub const APPROACH_MARGIN: f32 = 48.0;
@@ -94,7 +100,8 @@ mod tests {
 
     #[test]
     fn road_width_matches_lane_count() {
-        assert!((ROAD_WIDTH - LANE_WIDTH * LANES_PER_APPROACH as f32).abs() < f32::EPSILON);
+        assert!((INBOUND_ROAD_WIDTH - LANE_WIDTH * LANES_PER_APPROACH as f32).abs() < f32::EPSILON);
+        assert!((ROAD_ARM_WIDTH - INBOUND_ROAD_WIDTH * 2.0).abs() < f32::EPSILON);
     }
 
     #[test]
