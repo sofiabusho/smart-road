@@ -109,7 +109,7 @@ Execution order:
 | B02 | ✅ | **Route adherence**: lane-locked polylines on `IntersectionModel` | M | B01, A03 🔗 | REQ-2, REQ-6 · AUD-28 | AUD-28 | B |
 | B03 | ✅ | **Velocity levels**: ≥3 distinct speeds | S | B01 | REQ-7 · AUD-31 | AUD-31 | B |
 | B04 | ✅ | **Safe distance**: follow logic, positive constant | M | B01 | REQ-8 · AUD-29, AUD-30 | AUD-29, AUD-30 | B |
-| B05 | ⬜ | **Acceleration / deceleration** *(bonus)* | M | B01 | REQ-B3 · AUD-B3 | AUD-B3 | B |
+| B05 | ✅ | **Acceleration / deceleration** *(bonus)* | M | B01 | REQ-B3 · AUD-B3 | AUD-B3 | B |
 
 **Intra-track chain**: B01 → B02 → B03 → B04 (B03/B04 can parallel after B01 if stubs stable).
 
@@ -178,7 +178,7 @@ No circular dependencies.
 | When | Pick up | Blocked by |
 |------|---------|------------|
 | While waiting | Read `docs/SDS.md` §13 stubs; draft `vehicle.rs` types offline | — |
-| **Now** | **B05** *(bonus)* | — |
+| **Now** | — | — |
 | After B01 ✅ | ~~**B03** ∥ **B04**~~ ✅ | — |
 
 ### Dev C (Smart control & stats)
@@ -335,7 +335,7 @@ No circular dependencies.
 
 ### Dev B
 
-1. **B05** *(bonus)* — acceleration / deceleration
+1. ~~**B05**~~ ✅ *(bonus)* — acceleration / deceleration
 2. **B01**–**B04** ✅ — physics through safe distance complete
 
 ### Dev C

@@ -155,11 +155,12 @@ pub enum VehicleState {
 }
 ```
 
-### 5.1 Physics (REQ-5, REQ-7, REQ-8)
+### 5.1 Physics (REQ-5, REQ-7, REQ-8, REQ-B3)
 
 - Maintain `distance_in_crossing` and `time_in_crossing` while `state >= Managed`.
 - Reported velocity: `velocity = distance_in_crossing / time_in_crossing` (guard divide-by-zero).
 - **Velocity levels**: at least three discrete setpoints, e.g. `FAST`, `CRUISE`, `YIELD` (configurable floats).
+- **Acceleration / deceleration** (REQ-B3): `BASE_ACCELERATION` and `BASE_DECELERATION` in `config.rs`; `step_velocity_toward_command` ramps actual `velocity` toward `commanded_velocity` each frame (no instantaneous jumps). Per-vehicle scales from `motion_profile(id)`.
 - **Safe distance**: `SAFE_DISTANCE: f32` in `config.rs` (strictly positive). Follower must keep `distance_to_leader >= SAFE_DISTANCE`.
 - **Close call**: record when two vehicles pass with separation `< SAFE_DISTANCE` but `> collision_threshold`.
 
@@ -425,7 +426,7 @@ pub fn draw_vehicle(canvas: &mut Canvas, snapshot: &VehicleRenderSnapshot);
 
 ### 13.3 Track B exports (vehicle simulation)
 
-Delivered by **B01**–**B04**; **B01** can start when A04's `SpawnRequest` stub exists.
+Delivered by **B01**–**B05**; **B01** can start when A04's `SpawnRequest` stub exists.
 
 ```rust
 // vehicle.rs — A04 IF-1 stub fields; B01 expands physics
@@ -438,10 +439,11 @@ pub struct Vehicle {
     pub approach: Cardinal,       // A04 stub
     pub position: Vec2,           // A04 stub; B01 integrates
     pub heading_rad: f32,         // A04 stub
-    pub velocity: f32,
+    pub velocity: f32,            // actual speed; B05 ramps toward commanded_velocity
     pub state: VehicleState,
     // B01+: path_index, distance_in_crossing, time_in_crossing
-    // IF-2: commanded_velocity (B01 field; C writes in Managed state)
+    // IF-2: commanded_velocity (B01 field; B04/B05 set in approach; C writes in Managed state)
+    // B04: nominal_velocity — spawn cruise restored when follow gap clears
 }
 
 pub enum VehicleState { Approaching, Managed, Exiting, Done }
@@ -449,22 +451,30 @@ pub enum VehicleState { Approaching, Managed, Exiting, Done }
 pub enum VelocityLevel { Fast, Cruise, Yield }  // ≥3 levels (B03)
 
 pub fn spawn_vehicle(id: VehicleId, lane: &LaneInfo, velocity: f32) -> Vehicle;  // A04 IF-1 stub
-pub fn integrate_physics(vehicle: &mut Vehicle, dt: f32);  // B01
+pub fn integrate_physics(vehicle: &mut Vehicle, dt: f32);  // B01; B05 ramps velocity inside
 pub fn snapshot_for_render(vehicle: &Vehicle) -> VehicleRenderSnapshot;  // A04 stub; uses intersection::VehicleRenderSnapshot
 
 // B02 — route adherence
 pub fn attach_paths(model: &mut IntersectionModel, paths: LanePathMap);
-pub fn advance_along_path(vehicle: &mut Vehicle, model: &IntersectionModel, dt: f32);
+pub fn advance_along_path(vehicle: &mut Vehicle, model: &IntersectionModel, dt: f32);  // B05 ramps velocity inside
 
 // B04 — safe distance (approach zone; smart zone defers to C)
-pub fn enforce_follow_distance(vehicles: &mut [Vehicle], safe_distance: f32);
+pub fn enforce_follow_distance(vehicles: &mut [Vehicle], safe_distance: f32);  // sets commanded_velocity only
 pub fn detect_close_call(a: &Vehicle, b: &Vehicle, safe_distance: f32) -> bool;
+
+// B05 — acceleration / deceleration (REQ-B3)
+pub fn motion_profile(id: VehicleId) -> (f32, f32);  // (accel_scale, decel_scale) from id % 3
+pub fn step_velocity_toward_command(vehicle: &mut Vehicle, dt: f32);
+
+// config.rs (B proposes; A owns file) — B05 tunables
+pub const BASE_ACCELERATION: f32;
+pub const BASE_DECELERATION: f32;
 ```
 
 **Velocity authority split** (see §13.6 open decision):
 
-- **Approaching**: B sets velocity via follow-distance + level.
-- **Managed** (inside zone): C commands via `commanded_velocity`; B integrates position.
+- **Approaching / Exiting**: B sets `commanded_velocity` via follow-distance + `nominal_velocity`; B05 ramps actual `velocity` toward that command each frame.
+- **Managed** (inside zone): C commands via `commanded_velocity`; B05 ramps `velocity`; B integrates position along path.
 
 ### 13.4 Track C exports (smart control & stats)
 

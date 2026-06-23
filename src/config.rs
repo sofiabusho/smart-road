@@ -61,6 +61,12 @@ pub const VEHICLE_LENGTH: f32 = 36.0;
 /// PRD OQ-2: strictly positive and at least one vehicle length.
 pub const SAFE_DISTANCE: f32 = 40.0;
 
+/// Maximum acceleration toward commanded speed (world units/s²). B05 scales per vehicle.
+pub const BASE_ACCELERATION: f32 = 180.0;
+
+/// Maximum deceleration toward commanded speed (world units/s²). B05 scales per vehicle.
+pub const BASE_DECELERATION: f32 = 240.0;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,5 +107,11 @@ mod tests {
             SAFE_DISTANCE >= VEHICLE_LENGTH,
             "safe distance should be at least one vehicle length"
         );
+    }
+
+    #[test]
+    fn motion_limits_are_positive() {
+        assert!(BASE_ACCELERATION > 0.0);
+        assert!(BASE_DECELERATION > 0.0);
     }
 }
