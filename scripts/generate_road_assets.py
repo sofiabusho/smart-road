@@ -90,27 +90,73 @@ def dashed_horizontal(pixels: list, y: int, dash: int = 12, gap: int = 10) -> No
         on = not on
 
 
+def solid_vertical(pixels: list, x: int) -> None:
+    h = len(pixels)
+    for y in range(h):
+        pixels[y][x] = MARKING
+
+
+def solid_horizontal(pixels: list, y: int) -> None:
+    w = len(pixels[0])
+    for x in range(w):
+        pixels[y][x] = MARKING
+
+
 def road_vertical(width: int, height: int, lane_width: int) -> list[list[tuple[int, int, int]]]:
+    """Six-lane vertical arm: inbound (west) + outbound (east) with center divider."""
     pixels = fill(width, height, ASPHALT)
+    inbound_lanes = 3
+    # Inbound lane dividers (west half).
     dashed_vertical(pixels, lane_width)
     dashed_vertical(pixels, lane_width * 2)
+    # Center divider (double solid).
+    mid = inbound_lanes * lane_width
+    solid_vertical(pixels, mid - 1)
+    solid_vertical(pixels, mid)
+    # Outbound lane dividers (east half).
+    dashed_vertical(pixels, mid + lane_width)
+    dashed_vertical(pixels, mid + lane_width * 2)
     return pixels
 
 
 def road_horizontal(width: int, height: int, lane_width: int) -> list[list[tuple[int, int, int]]]:
+    """Six-lane horizontal arm: inbound (north) + outbound (south) with center divider."""
     pixels = fill(width, height, ASPHALT)
+    inbound_lanes = 3
     dashed_horizontal(pixels, lane_width)
     dashed_horizontal(pixels, lane_width * 2)
+    mid = inbound_lanes * lane_width
+    solid_horizontal(pixels, mid - 1)
+    solid_horizontal(pixels, mid)
+    dashed_horizontal(pixels, mid + lane_width)
+    dashed_horizontal(pixels, mid + lane_width * 2)
     return pixels
 
 
 def intersection_core(size: int, lane_width: int) -> list[list[tuple[int, int, int]]]:
+    """Six-lane junction core with center dividers on both axes."""
     pixels = fill(size, size, ASPHALT)
-    mid = size // 2
-    dashed_vertical(pixels, mid - lane_width // 2)
-    dashed_vertical(pixels, mid + lane_width // 2)
-    dashed_horizontal(pixels, mid - lane_width // 2)
-    dashed_horizontal(pixels, mid + lane_width // 2)
+    inbound_lanes = 3
+    mid = inbound_lanes * lane_width
+
+    # Inbound lane markings.
+    dashed_vertical(pixels, lane_width)
+    dashed_vertical(pixels, lane_width * 2)
+    dashed_horizontal(pixels, lane_width)
+    dashed_horizontal(pixels, lane_width * 2)
+
+    # Center dividers.
+    solid_vertical(pixels, mid - 1)
+    solid_vertical(pixels, mid)
+    solid_horizontal(pixels, mid - 1)
+    solid_horizontal(pixels, mid)
+
+    # Outbound lane markings.
+    dashed_vertical(pixels, mid + lane_width)
+    dashed_vertical(pixels, mid + lane_width * 2)
+    dashed_horizontal(pixels, mid + lane_width)
+    dashed_horizontal(pixels, mid + lane_width * 2)
+
     return pixels
 
 
@@ -120,29 +166,30 @@ def main() -> None:
     window_height = 768
     lane_width = 40
     lanes_per_approach = 3
+    lanes_per_arm = lanes_per_approach * 2
     approach_margin = 48
 
-    road_width = lane_width * lanes_per_approach
-    ns_arm_length = window_height // 2 - road_width // 2 - approach_margin
-    ew_arm_length = window_width // 2 - road_width // 2 - approach_margin
+    road_arm_width = lane_width * lanes_per_arm
+    ns_arm_length = window_height // 2 - road_arm_width // 2 - approach_margin
+    ew_arm_length = window_width // 2 - road_arm_width // 2 - approach_margin
 
     write_bmp(
         os.path.join(OUT_DIR, "approach_ns.bmp"),
-        road_width,
+        road_arm_width,
         ns_arm_length,
-        road_vertical(road_width, ns_arm_length, lane_width),
+        road_vertical(road_arm_width, ns_arm_length, lane_width),
     )
     write_bmp(
         os.path.join(OUT_DIR, "approach_ew.bmp"),
         ew_arm_length,
-        road_width,
-        road_horizontal(ew_arm_length, road_width, lane_width),
+        road_arm_width,
+        road_horizontal(ew_arm_length, road_arm_width, lane_width),
     )
     write_bmp(
         os.path.join(OUT_DIR, "intersection_core.bmp"),
-        road_width,
-        road_width,
-        intersection_core(road_width, lane_width),
+        road_arm_width,
+        road_arm_width,
+        intersection_core(road_arm_width, lane_width),
     )
     print(f"Wrote road assets to {OUT_DIR}")
 
