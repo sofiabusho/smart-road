@@ -108,7 +108,7 @@ pub fn apply_event(stats: &mut Stats, event: StatsEvent) {
 }
 
 fn update_velocity_bounds(stats: &mut Stats, velocity: f32) {
-    if velocity <= 0.0 {
+    if velocity < 0.0 {
         return;
     }
     stats.max_velocity = stats.max_velocity.max(velocity);

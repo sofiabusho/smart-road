@@ -71,6 +71,51 @@ sudo apt install -y libsdl2-image-dev
 
 Without SDL2_image, use 32-bit BMP with alpha (default).
 
+## Controls
+
+| Key | Action |
+|-----|--------|
+| **Arrow Up** | Spawn from **South** (vehicle travels north) |
+| **Arrow Down** | Spawn from **North** (vehicle travels south) |
+| **Arrow Right** | Spawn from **West** (vehicle travels east) |
+| **Arrow Left** | Spawn from **East** (vehicle travels west) |
+| **R** (hold) | Continuous random spawn (approach + route) |
+| **Esc** | End session and open **statistics window** |
+
+Spawn cooldown (~400 ms per approach) prevents overlapping spawns on the same direction. Close the stats window (or press **Esc** again) to quit after a session.
+
+## Audit dry-run (Gate G2)
+
+Full acceptance checklist: **[docs/audit.md](docs/audit.md)** (AUD-1–AUD-31).
+
+**Quick verification workflow** (C07):
+
+1. Install SDL2 and build (`cargo build`). Run `cargo test` — all tests should pass.
+2. Start the sim: `cargo run`.
+3. Walk **§1 Core Functionality** in `docs/audit.md` in order (spawn keys → collision scenarios → sustained `R` traffic → stats on **Esc**).
+4. Run `cargo clippy -- -D warnings` and `cargo fmt --check` for NFR-5 evidence.
+
+**Automated audit mirrors** (smoke tests in `tests/smoke.rs`):
+
+| AUD IDs | Smoke test |
+|---------|------------|
+| AUD-8 | `crate_smoke_audit8_three_same_lane_all_approaches` |
+| AUD-9–AUD-14 | `crate_smoke_audit9` … `audit14` |
+| AUD-15 | `crate_smoke_aud15_scheduler_yields_without_proximity_clamp` |
+| AUD-16–AUD-17 | `crate_smoke_aud16_aud17_sustained_no_overlap_no_lane_overflow` |
+| AUD-18 | `crate_smoke_audit18_four_vehicle_session_no_collision` |
+| AUD-19 | `crate_smoke_audit19_stats_window_is_separate_surface` |
+| AUD-20–AUD-24 | `crate_smoke_session_stats_populated_before_esc_exit` |
+| AUD-25 | `crate_smoke_audit25_single_vehicle_equal_crossing_times` |
+| AUD-27–AUD-30 | unit tests in `spawn.rs`, `vehicle.rs` |
+
+Manual spot-checks still required for **AUD-1–AUD-2** (visual assets), **AUD-7** (varied random spawns), **AUD-28** (route adherence / turn animation), **AUD-26** (stopwatch vs reported crossing time), and **AUD-31** (three visible speed levels).
+
+**Known limitations** (documented in `docs/audit_plan.md`):
+
+- Managed-zone velocity changes are instantaneous (B05 ramp applies on approach lanes, not inside the scheduler zone).
+- Center-to-center safe distance is 40 px vs 36 px vehicle length — vehicles may look nearly bumper-to-bumper without overlapping.
+
 ## Build and run
 
 ```bash
@@ -106,6 +151,7 @@ docs/          # Requirements, audit, PRD, SDS, ticket tracker
 | [AGENTS.md](AGENTS.md) | Agent coding guidelines |
 | [docs/requirements.md](docs/requirements.md) | Stakeholder requirements |
 | [docs/audit.md](docs/audit.md) | Acceptance checklist |
+| [docs/audit_plan.md](docs/audit_plan.md) | Audit dry-run notes and known limitations |
 | [docs/ticket-tracker.md](docs/ticket-tracker.md) | A/B/C track tickets |
 
 ## License
