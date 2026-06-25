@@ -11,39 +11,33 @@ The codebase implements a Rust/SDL2 smart-intersection simulation with:
 - Spawn anti-spam cooldown (400 ms per approach direction).
 - Post-Esc statistics window with seven required fields plus four bonus fields.
 
-**Ticket status (from `docs/ticket-tracker.md`, refreshed 2026-06-24):**
-A01–A08 ✅, B01–B05 ✅, C01–C06 ✅, C08 ✅.
-**C07 (audit dry-run) is ⬜ — the integration gate has never been walked through.**
+**Ticket status (from `docs/ticket-tracker.md`, refreshed 2026-06-25):**
+All tickets **A01–A08**, **B01–B05**, **C01–C08** ✅ — **Gate G2** complete.
+**C07** (audit dry-run) merged — README runbook in [README.md](../README.md#audit-dry-run-gate-g2), handover in [docs/pr-messages/C07-audit-dry-run-pr.md](pr-messages/C07-audit-dry-run-pr.md).
+
+**Automated coverage (2026-06-25):** `cargo test --lib` (90) + `cargo test --test smoke` (23). See README audit table for AUD ↔ smoke mapping. Manual spot-checks still recommended for AUD-1/2 visuals, AUD-26 stopwatch, AUD-28 turn animation, AUD-31 visible speeds, AUD-B3/B4.
 
 **Referenced documents that exist:** `docs/requirements.md` ✅, `docs/ticket-tracker.md` ✅,
-`docs/PRD.md` ✅, `docs/SDS.md` ✅.
+`docs/PRD.md` ✅, `docs/SDS.md` ✅, `docs/audit.md` ✅.
 
 ---
 
-## Known Bugs / Things to Watch Out For
+## Known limitations (post-C07)
 
-### BUG-1 — Close-call detection is same-lane only (affects AUD-24)
+### FIXED in C07 (no longer apply)
 
-**File:** [src/vehicle.rs:231-243](src/vehicle.rs#L231-L243)
+| ID | Was | Fixed in |
+|----|-----|----------|
+| BUG-1 | Close-call detection same-lane only | `vehicle.rs::detect_close_call` — Euclidean distance for any vehicle pair |
+| BUG-3 | `SpawnRng` always seeded at 1 | `spawn.rs` — `SystemTime` nanosecond seed |
+| BUG-4 | `on_key_down` cleared event queue | `input.rs` — events accumulate per SDL poll |
+| BUG-5 | `min_velocity` skipped 0 | `stats.rs` — records `velocity >= 0` |
 
-```rust
-pub fn detect_close_call(a: &Vehicle, b: &Vehicle, safe_distance: f32) -> bool {
-    if a.lane_id != b.lane_id || a.id == b.id {  // ← only same lane
-        return false;
-    }
-    ...
-}
-```
+### Still watch during manual audit
 
-Cross-traffic near-misses inside the junction (the main collision risk) are never flagged. `app.rs::record_close_calls` (line 145) calls this function for all vehicle pairs, but the `lane_id` guard silently skips every inter-lane pair. The stats window **will always show Close calls: 0** even after a genuine intersection near-miss. The docstring in `vehicle.rs` acknowledges this ("C05 should prefer longitudinal checks for close calls") but it was never fixed.
+### LIM-1 — Smart controller bypasses B05 physics for managed vehicles (affects AUD-B3)
 
-**Spot it during testing:** Run sustained R traffic for 60 s, watch for vehicles that obviously yield to each other inside the junction, then press Esc and verify the close-call count. Expect 0 even when near-misses occurred.
-
----
-
-### BUG-2 — Smart controller bypasses B05 physics for managed vehicles (affects AUD-B3)
-
-**File:** [src/smart.rs:103-108](src/smart.rs#L103-L108) and [src/smart.rs:43](src/smart.rs#L43)
+**File:** `src/smart.rs` (`schedule_managed_velocities`, `on_vehicle_enter_zone`)
 
 ```rust
 // schedule_managed_velocities — runs every frame
@@ -58,58 +52,11 @@ vehicle.velocity = vehicle.nominal_velocity;  // ← also snaps on entry
 
 `step_velocity_toward_command` (the B05 ramp) is called by `advance_along_path` AFTER the smart controller has already matched `velocity` to `commanded_velocity`, so the ramp is a no-op for managed vehicles. Vehicles inside the junction teleport to full speed each frame after the reset, then may be immediately yanked to yield speed — all instantaneously.
 
-**Spot it during testing:** AUD-B3 asks you to watch a vehicle slow down gradually. This works for **approaching** vehicles (the follow-distance logic in B04 uses commanded_velocity without snapping actual velocity). But a vehicle that enters the managed zone and is commanded to yield will have its velocity snapped, not ramped.
+**Spot it during testing:** AUD-B3 asks you to watch a vehicle slow down gradually. This works for **approaching** vehicles (B04 follow-distance sets `commanded_velocity`; B05 ramp applies in `advance_along_path`). Inside the managed zone, speed changes are **instant** — AUD-15 still passes (visible reduction), AUD-B3 passes only when observing approach-lane deceleration.
 
 ---
 
-### BUG-3 — SpawnRng always seeds at 1 (affects AUD-7)
-
-**File:** [src/spawn.rs:19-21](src/spawn.rs#L19-L21)
-
-```rust
-fn new() -> Self {
-    let seed = Instant::now().elapsed().as_nanos() as u32;
-    Self { state: seed.max(1) }
-}
-```
-
-`Instant::now().elapsed()` measures time since a freshly created `Instant`, which is effectively 0 ns. After `.max(1)` the seed is always 1. The xorshift32 produces a fixed sequence each session. Within a single session `R` still produces varied spawns (the PRNG generates different values per call), so AUD-7 should pass. But the sequence is **identical across restarts**, which auditors who run multiple sessions will notice.
-
----
-
-### BUG-4 — `on_key_down` clears the event queue at the start (affects AUD-3 through AUD-6)
-
-**File:** [src/input.rs:39](src/input.rs#L39)
-
-```rust
-pub fn on_key_down(&mut self, keycode: Option<Keycode>) {
-    self.events.clear();  // ← wipes previous keys pressed earlier this frame
-    ...
-}
-```
-
-`app.rs::poll_events` iterates through all pending SDL events and calls `on_key_down` for each. If two arrow keys appear in the same poll cycle (e.g., two rapid presses both pending in the SDL queue), the first key's spawn event is cleared when the second is processed. In practice, manual testing one key at a time is safe, but a fast-typing auditor or automation could lose events.
-
----
-
-### BUG-5 — `min_velocity` never records 0.0 (affects AUD-21, AUD-31)
-
-**File:** [src/stats.rs:110-116](src/stats.rs#L110-L116)
-
-```rust
-fn update_velocity_bounds(stats: &mut Stats, velocity: f32) {
-    if velocity <= 0.0 {
-        return;  // ← zero-velocity samples silently dropped
-    }
-    ...
-}
-```
-
-When the smart controller stops a vehicle inside the junction (`commanded_velocity = 0.0`, `velocity = 0.0`), those frames produce velocity samples of 0. They are ignored. `min_velocity` will show the slowest non-zero speed, not the actual lowest speed vehicles reach. AUD-21 only requires that the field has a numeric value, so this passes, but AUD-31 (three distinct velocities) is unaffected since VelocityLevel::Yield is still recorded when the vehicle is not stopped.
-
----
-
-### BUG-6 — `SAFE_DISTANCE` is only marginally larger than `VEHICLE_LENGTH` (affects AUD-29, AUD-30)
+### LIM-2 — `SAFE_DISTANCE` is only marginally larger than `VEHICLE_LENGTH` (affects AUD-29, AUD-30)
 
 **File:** [src/config.rs:77](src/config.rs#L77) and [src/config.rs:73](src/config.rs#L73)
 
@@ -118,13 +65,7 @@ SAFE_DISTANCE = 40.0
 VEHICLE_LENGTH = 36.0   // gap is only 4 px
 ```
 
-The B04 follow logic maintains a 40 px center-to-center gap, but the vehicle sprite is 36 px long. Visually, vehicles may appear to overlap (bumper-to-bumper gap ≈ 4 px) even when the safe distance is technically maintained. An auditor watching closely might flag this as a collision.
-
----
-
-### GAP-1 — C07 (audit dry-run) never completed
-
-C07 is the integration gate that verifies AUD-1 through AUD-31 pass end-to-end. It is marked ⬜ (Not Started) in `docs/ticket-tracker.md`, though all its dependencies are marked ✅. No prior integrated verification run exists. This means the plan below may uncover failures that would have been caught by C07.
+The B04 follow logic maintains a 40 px center-to-center gap, but the vehicle sprite is 36 px long. Visually, vehicles may appear nearly bumper-to-bumper. Do not mark collision unless centers actually overlap.
 
 ---
 
@@ -181,7 +122,7 @@ Verify: Spawn one with Arrow Up, three with Arrow Left. Repeat until conflicting
 
 `input.rs:16-23`: Arrow Right → `Cardinal::West` (vehicle comes FROM west, travels east). Arrow Left → `Cardinal::East`. This matches REQ-14/REQ-15 ("Arrow Right spawns from West") but is counterintuitive. Confirm by watching the vehicle enter from the expected side.
 
-**AUD-8 — Same-lane following may still look like overlap (BUG-6)**
+**AUD-8 — Same-lane following may still look tight (LIM-2)**
 
 The 4 px visual gap between VEHICLE_LENGTH (36) and SAFE_DISTANCE (40) means bumper-to-bumper vehicles look nearly touching. Don't mark as collision unless actual position overlap occurs.
 
@@ -246,7 +187,7 @@ Verify: After the AUD-18 session (exactly four vehicles crossed), read the stats
 
 ### Potential Issues
 
-**AUD-15 — Velocity reduction may be instant rather than gradual for managed vehicles (BUG-2)**
+**AUD-15 — Velocity reduction may be instant inside the junction (LIM-1)**
 
 `smart.rs:108` directly assigns `vehicle.velocity = vehicle.nominal_velocity` before the yield check, and `smart.rs:146` assigns `vehicles[yielder].velocity = vehicles[yielder].commanded_velocity` for the yield step. Neither uses the B05 ramp. For vehicles already inside the junction, deceleration will look instantaneous. The gradual ramp only works for **approaching** vehicles (B04 follow-distance logic, which sets `commanded_velocity` without touching `velocity`). AUD-15 asks for "visible speed reduction, not teleport or overlap" — a speed snap inside the junction might still be visible as a speed change, just not gradual.
 
@@ -254,9 +195,13 @@ Verify: After the AUD-18 session (exactly four vehicles crossed), read the stats
 
 `spawn.rs:10,149-153`: `LANE_CAPACITY = 8`. When 8 vehicles are queued on a single lane, no more spawn on that lane. This is counted per `lane_id`, not per approach — each approach has three lanes, so an approach can hold up to 24 queued vehicles total. AUD-17's threshold is "fewer than 8 vehicles stuck in the same lane." Verify that no single lane accumulates 8+ stopped vehicles.
 
-**AUD-16 — Deterministic RNG (BUG-3)**
+**AUD-16–AUD-17 — Automated smoke coverage**
 
-`spawn.rs:19-21`: the PRNG seeds at 1 every run. This means the sequence of random lane/route picks is identical across restarts. If you notice the same pattern on every run, this is why. Within a single 60-second session, variety should still occur since the xorshift shifts state on each call.
+`crate_smoke_aud16_aud17_sustained_no_overlap_no_lane_overflow` exercises sustained random traffic with lane cap. Manual 60 s `R` run still recommended for visual confirmation.
+
+**AUD-16 — RNG variety (fixed in C07)**
+
+`spawn.rs`: PRNG seeds from `SystemTime` nanoseconds — sequences differ across restarts. Within a session, xorshift still produces varied lane/route picks.
 
 **AUD-19 — Stats window only appears on Esc, not on window close**
 
@@ -343,13 +288,13 @@ Verify: Review the smart-intersection strategy during sustained R traffic. Pass 
 
 ### Potential Issues
 
-**AUD-21 — Min velocity never shows 0.0 (BUG-5)**
+**AUD-21 — Min velocity includes 0 when stopped (fixed in C07)**
 
-`stats.rs:110-116`: `update_velocity_bounds` skips samples where `velocity <= 0.0`. A vehicle stopped by the smart controller at velocity=0 never updates `min_velocity`. The displayed minimum will be the lowest non-zero speed observed (likely the Yield level: 60 px/s). AUD-21 only requires a numeric value, so this passes — but note the displayed minimum does not reflect actual lowest speed.
+`stats.rs::update_velocity_bounds` records samples where `velocity >= 0`, so a stopped vehicle can display `Min velocity: 0.0`.
 
-**AUD-24 — Close calls likely always 0 (BUG-1)**
+**AUD-24 — Close calls count cross-traffic pairs (fixed in C07)**
 
-`vehicle.rs:232`: `detect_close_call` early-returns when `a.lane_id != b.lane_id`. `app.rs:155` calls this for all pairs. Cross-traffic near-misses — the primary kind in an intersection — are never counted. The close-calls counter will show 0 for the entire session unless same-lane vehicles somehow violate safe distance (which the B04 follow logic is designed to prevent). AUD-24 says "0 is valid when none occurred," so the test may still pass, but it cannot be verified as meaningful.
+`vehicle.rs::detect_close_call` uses center-to-center distance for any active vehicle pair within `SAFE_DISTANCE`. After sustained traffic with near-misses, Esc may show a non-zero close-call count.
 
 **AUD-25, AUD-26 — Crossing time measurement window**
 
@@ -363,7 +308,7 @@ Verify: Review the smart-intersection strategy during sustained R traffic. Pass 
 
 `spawn.rs:177-186` (`spawn_on_approach`): Each press of the same arrow key cycles through Route::Right → Route::Straight → Route::Left → Route::Right. Auditors watching route adherence should note that consecutive presses of the same key spawn vehicles on different routes — a vehicle on route::Right turns right; the next on Straight goes straight through. Verify the turn animation aligns with the actual path the vehicle follows.
 
-**AUD-29 — SAFE_DISTANCE is strictly positive but barely exceeds VEHICLE_LENGTH (BUG-6)**
+**AUD-29 — SAFE_DISTANCE is strictly positive but barely exceeds VEHICLE_LENGTH (LIM-2)**
 
 `config.rs:77`: `SAFE_DISTANCE = 40.0`. `config.rs:73`: `VEHICLE_LENGTH = 36.0`. The constant passes the code test (`safe_distance_is_positive_and_vehicle_scaled` in config.rs:119-126). The visual gap between following vehicles is only 4 px, which at 1:1 pixel scale looks like bumper-to-bumper contact. Confirm no actual center-overlap — if vehicles appear to pass through each other, that is a collision regardless of the constant.
 
@@ -375,7 +320,7 @@ Verify: Review the smart-intersection strategy during sustained R traffic. Pass 
 
 `vehicle.rs:88-93` (`spawn_vehicle`): `id.0 % 3` assigns the velocity level. VehicleId is sequential, so vehicles 1, 4, 7… get Yield (60 px/s); 2, 5, 8… get Cruise (120 px/s); 3, 6, 9… get Fast (168 px/s). In any session with ≥3 vehicles spawned, all three levels appear. Watch for visible speed differences — the fast vehicle noticeably outruns the yield vehicle.
 
-**AUD-B3 — Gradual deceleration works only for approaching vehicles (BUG-2)**
+**AUD-B3 — Gradual deceleration works only for approaching vehicles (LIM-1)**
 
 `vehicle.rs:68-84` (`step_velocity_toward_command`): The ramp uses `BASE_DECELERATION * decel_scale * dt` per frame. For approaching vehicles, the B04 follow logic writes only to `commanded_velocity`, letting the B05 ramp take effect. But for managed vehicles, `smart.rs:108` writes directly to `velocity`, neutralizing the ramp. To see AUD-B3 pass: observe a vehicle **before** it enters the junction zone slow down behind a stopped leader — that deceleration is gradual. Inside the junction, speed changes are instant.
 
@@ -413,11 +358,14 @@ All three auditors must complete these steps before starting any checks:
    ```
    A 1024×768 window titled "smart-road" should appear with the intersection rendered.
 
-5. **Run the test suite** (optional but recommended before starting):
+5. **Run the test suite** (recommended before starting):
    ```
-   cargo test
+   cargo test --lib
+   cargo test --test smoke
    ```
-   All tests should pass. Any failure here signals a regression that could affect audit checks.
+   Expect 90 unit + 23 smoke tests passing. Optional manual SDL test:
+   `cargo test --test manual_stats_window manual_audit19_stats_window_opens -- --ignored --nocapture`
+   (requires SDL2 DLL on `PATH` for Windows).
 
 6. **Arrow key / approach reminder** (counterintuitive mapping):
    - Arrow Up → South approach (vehicle enters from bottom, travels upward)
