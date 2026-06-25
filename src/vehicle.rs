@@ -53,6 +53,28 @@ pub struct Vehicle {
     pub path_index: usize,
     pub distance_in_crossing: f32,
     pub time_in_crossing: f32,
+    /// True when the smart controller granted intersection entry (reservation gate).
+    pub reservation_granted: bool,
+}
+
+/// Maximum speed that still allows a full stop within `distance` at deceleration `decel`.
+pub fn max_speed_to_stop(distance: f32, decel: f32) -> f32 {
+    if distance <= 0.0 {
+        0.0
+    } else {
+        (2.0 * decel * distance).max(0.0).sqrt()
+    }
+}
+
+/// Cap commanded speed so an unreserved vehicle can stop before the junction zone.
+pub fn apply_reservation_braking(vehicle: &mut Vehicle, distance_to_zone: f32) {
+    let (_, decel_scale) = motion_profile(vehicle.id);
+    let decel = crate::config::BASE_DECELERATION * decel_scale;
+    let cap = max_speed_to_stop(distance_to_zone, decel);
+    vehicle.commanded_velocity = vehicle.commanded_velocity.min(cap);
+    if !vehicle.reservation_granted && distance_to_zone <= crate::config::VEHICLE_LENGTH {
+        vehicle.commanded_velocity = 0.0;
+    }
 }
 
 /// Per-vehicle acceleration and deceleration scale (REQ-B3 / AUD-B3).
@@ -105,6 +127,7 @@ pub fn spawn_vehicle(id: VehicleId, lane: &LaneInfo, _velocity: f32) -> Vehicle 
         path_index: 0,
         distance_in_crossing: 0.0,
         time_in_crossing: 0.0,
+        reservation_granted: false,
     }
 }
 
@@ -241,13 +264,41 @@ pub fn detect_close_call(a: &Vehicle, b: &Vehicle, safe_distance: f32) -> bool {
     dist_sq > 0.0 && dist_sq < safe_distance * safe_distance
 }
 
-/// Zero commanded speed and nudge apart when centers are within one vehicle length.
+/// Minimum clearance between oriented vehicle boxes (world units).
+const PROXIMITY_BOX_CLEARANCE: f32 = 2.0;
+
+/// Projected half-extent of the vehicle sprite onto a unit axis.
+fn projected_half_extent(heading_rad: f32, axis_x: f32, axis_y: f32) -> f32 {
+    let half_length = crate::config::VEHICLE_LENGTH * 0.5;
+    let half_width = crate::config::VEHICLE_WIDTH * 0.5;
+    let cos = heading_rad.cos().abs();
+    let sin = heading_rad.sin().abs();
+    half_length * (cos * axis_x.abs() + sin * axis_y.abs())
+        + half_width * (sin * axis_x.abs() + cos * axis_y.abs())
+}
+
+/// Gap between oriented vehicle boxes along the center-to-center axis (negative = overlap).
+pub fn sprite_separation_gap(a: &Vehicle, b: &Vehicle) -> f32 {
+    let dx = b.position.x - a.position.x;
+    let dy = b.position.y - a.position.y;
+    let center_dist = (dx * dx + dy * dy).sqrt();
+    if center_dist <= f32::EPSILON {
+        return -1.0;
+    }
+    let axis_x = dx / center_dist;
+    let axis_y = dy / center_dist;
+    center_dist
+        - projected_half_extent(a.heading_rad, axis_x, axis_y)
+        - projected_half_extent(b.heading_rad, -axis_x, -axis_y)
+}
+
+/// Zero commanded speed and nudge apart when oriented sprites overlap.
 ///
 /// Runs in a loop until no pair remains within `min_gap`; this handles cascade scenarios
 /// where pushing pair (A, B) moves A into proximity with C, which would otherwise go
 /// unresolved in a single-pass sweep.
 pub fn clamp_velocity_for_proximity(vehicles: &mut [Vehicle]) {
-    let min_gap = crate::config::VEHICLE_LENGTH * 0.95;
+    let min_gap = PROXIMITY_BOX_CLEARANCE;
     let len = vehicles.len();
 
     loop {
@@ -263,28 +314,30 @@ pub fn clamp_velocity_for_proximity(vehicles: &mut [Vehicle]) {
                 }
                 let dx = vehicles[i].position.x - vehicles[j].position.x;
                 let dy = vehicles[i].position.y - vehicles[j].position.y;
-                let gap = (dx * dx + dy * dy).sqrt();
-                if gap < min_gap {
-                    any_pushed = true;
-                    vehicles[i].commanded_velocity = 0.0;
-                    vehicles[i].velocity = 0.0;
-                    vehicles[j].commanded_velocity = 0.0;
-                    vehicles[j].velocity = 0.0;
+                let center_dist = (dx * dx + dy * dy).sqrt();
+                let sep = sprite_separation_gap(&vehicles[i], &vehicles[j]);
+                if sep >= min_gap {
+                    continue;
+                }
+                any_pushed = true;
+                vehicles[i].commanded_velocity = 0.0;
+                vehicles[i].velocity = 0.0;
+                vehicles[j].commanded_velocity = 0.0;
+                vehicles[j].velocity = 0.0;
 
-                    if gap > f32::EPSILON {
-                        let push = (min_gap - gap) * 0.5 + 0.5;
-                        let nx = dx / gap;
-                        let ny = dy / gap;
-                        vehicles[i].position.x += nx * push;
-                        vehicles[i].position.y += ny * push;
-                        vehicles[j].position.x -= nx * push;
-                        vehicles[j].position.y -= ny * push;
-                    } else {
-                        let nx = vehicles[i].heading_rad.cos();
-                        let ny = vehicles[i].heading_rad.sin();
-                        vehicles[j].position.x -= min_gap * nx;
-                        vehicles[j].position.y -= min_gap * ny;
-                    }
+                let push = (min_gap - sep) * 0.5 + 0.5;
+                if center_dist > f32::EPSILON {
+                    let nx = dx / center_dist;
+                    let ny = dy / center_dist;
+                    vehicles[i].position.x += nx * push;
+                    vehicles[i].position.y += ny * push;
+                    vehicles[j].position.x -= nx * push;
+                    vehicles[j].position.y -= ny * push;
+                } else {
+                    let nx = vehicles[i].heading_rad.cos();
+                    let ny = vehicles[i].heading_rad.sin();
+                    vehicles[j].position.x -= (min_gap + crate::config::VEHICLE_LENGTH) * nx;
+                    vehicles[j].position.y -= (min_gap + crate::config::VEHICLE_LENGTH) * ny;
                 }
             }
         }
@@ -393,6 +446,7 @@ mod tests {
             path_index: 0,
             distance_in_crossing: 0.0,
             time_in_crossing: 0.0,
+            reservation_granted: false,
         }
     }
 
@@ -482,6 +536,7 @@ mod tests {
             path_index: 0,
             distance_in_crossing: 0.0,
             time_in_crossing: 0.0,
+            reservation_granted: false,
         };
 
         integrate_physics(&mut vehicle, 0.1);
@@ -516,6 +571,7 @@ mod tests {
             path_index: 0,
             distance_in_crossing: 0.0,
             time_in_crossing: 0.0,
+            reservation_granted: false,
         };
 
         integrate_physics(&mut vehicle, 0.1);
@@ -546,6 +602,7 @@ mod tests {
             path_index: 0,
             distance_in_crossing: 0.0,
             time_in_crossing: 0.0,
+            reservation_granted: false,
         };
 
         integrate_physics(&mut vehicle, 0.1);
@@ -582,6 +639,7 @@ mod tests {
             path_index: 0,
             distance_in_crossing: 0.0,
             time_in_crossing: 0.0,
+            reservation_granted: false,
         };
 
         advance_along_path(&mut vehicle, &model, 1.0);
@@ -603,6 +661,20 @@ mod tests {
         vehicle.position.y = y;
         vehicle.position.x = lane.spawn_point.x;
         vehicle
+    }
+
+    #[test]
+    fn sprite_separation_gap_detects_oriented_overlap() {
+        let mut a = make_vehicle(1, 120.0);
+        let mut b = make_vehicle(2, 120.0);
+        a.heading_rad = 0.0;
+        b.heading_rad = 0.0;
+        a.position = Vec2::new(0.0, 0.0);
+        b.position = Vec2::new(crate::config::VEHICLE_LENGTH * 0.5, 0.0);
+        assert!(sprite_separation_gap(&a, &b) < 0.0);
+
+        b.position = Vec2::new(crate::config::VEHICLE_LENGTH + 4.0, 0.0);
+        assert!(sprite_separation_gap(&a, &b) >= 0.0);
     }
 
     #[test]
@@ -899,6 +971,7 @@ mod tests {
             path_index: 1,
             distance_in_crossing: 0.0,
             time_in_crossing: 0.0,
+            reservation_granted: false,
         };
 
         advance_along_path(&mut vehicle, &model, 0.25);

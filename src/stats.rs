@@ -293,6 +293,7 @@ mod tests {
             path_index: 0,
             distance_in_crossing: 0.0,
             time_in_crossing: 1.5,
+            reservation_granted: true,
         };
 
         session.observe_vehicles(std::slice::from_ref(&vehicle), 0.0);
@@ -357,6 +358,7 @@ mod tests {
                 path_index: 0,
                 distance_in_crossing: 0.0,
                 time_in_crossing: 0.0,
+                reservation_granted: true,
             },
             Vehicle {
                 id: VehicleId(2),
@@ -372,6 +374,7 @@ mod tests {
                 path_index: 0,
                 distance_in_crossing: 0.0,
                 time_in_crossing: 0.0,
+                reservation_granted: true,
             },
         ];
 
