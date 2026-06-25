@@ -36,7 +36,6 @@ impl InputState {
     }
 
     pub fn on_key_down(&mut self, keycode: Option<Keycode>) {
-        self.events.clear();
         let Some(key) = keycode else {
             return;
         };
@@ -123,6 +122,21 @@ mod tests {
         input.on_key_down(Some(Keycode::Up));
         let events: Vec<_> = input.drain_events().collect();
         assert_eq!(events, vec![InputEvent::SpawnCardinal(Cardinal::South)]);
+    }
+
+    #[test]
+    fn key_down_accumulates_spawn_events_in_one_poll() {
+        let mut input = InputState::new();
+        input.on_key_down(Some(Keycode::Up));
+        input.on_key_down(Some(Keycode::Right));
+        let events: Vec<_> = input.drain_events().collect();
+        assert_eq!(
+            events,
+            vec![
+                InputEvent::SpawnCardinal(Cardinal::South),
+                InputEvent::SpawnCardinal(Cardinal::West),
+            ]
+        );
     }
 
     #[test]

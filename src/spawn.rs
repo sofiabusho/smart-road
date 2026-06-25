@@ -1,7 +1,7 @@
 //! Keyboard-driven vehicle spawning (A04+).
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::intersection::{Cardinal, IntersectionModel, LaneId, Route, Vec2};
 use crate::vehicle::{spawn_vehicle, Vehicle, VehicleId, VehicleState};
@@ -17,7 +17,10 @@ struct SpawnRng {
 
 impl SpawnRng {
     fn new() -> Self {
-        let seed = Instant::now().elapsed().as_nanos() as u32;
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(1))
+            .as_nanos() as u32;
         Self { state: seed.max(1) }
     }
 

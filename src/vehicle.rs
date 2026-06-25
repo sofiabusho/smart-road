@@ -224,12 +224,11 @@ pub fn enforce_follow_distance(vehicles: &mut [Vehicle], safe_distance: f32) {
     }
 }
 
-/// True when two same-lane vehicles are within safe distance (REQ-26 scaffolding for C05).
+/// True when two active vehicles are within safe distance (REQ-26 / AUD-24).
 ///
-/// Uses center-to-center Euclidean distance. [`enforce_follow_distance`] uses
-/// longitudinal gap along heading — C05 should prefer longitudinal checks for close calls.
+/// Uses center-to-center Euclidean distance for same-lane and cross-traffic pairs.
 pub fn detect_close_call(a: &Vehicle, b: &Vehicle, safe_distance: f32) -> bool {
-    if a.lane_id != b.lane_id || a.id == b.id {
+    if a.id == b.id {
         return false;
     }
     if a.state == VehicleState::Done || b.state == VehicleState::Done {
@@ -616,7 +615,7 @@ mod tests {
     }
 
     #[test]
-    fn detect_close_call_ignores_different_lanes() {
+    fn detect_close_call_flags_cross_lane_proximity() {
         let model = IntersectionModel::new();
         let south = model
             .lane(lane_id(Cardinal::South, Route::Straight))
@@ -624,10 +623,12 @@ mod tests {
         let north = model
             .lane(lane_id(Cardinal::North, Route::Straight))
             .unwrap();
-        let a = spawn_vehicle(VehicleId(1), south, 120.0);
-        let b = spawn_vehicle(VehicleId(2), north, 120.0);
+        let mut a = spawn_vehicle(VehicleId(1), south, 120.0);
+        let mut b = spawn_vehicle(VehicleId(2), north, 120.0);
+        a.position = Vec2::new(100.0, 100.0);
+        b.position = Vec2::new(110.0, 105.0);
 
-        assert!(!detect_close_call(&a, &b, crate::config::SAFE_DISTANCE));
+        assert!(detect_close_call(&a, &b, crate::config::SAFE_DISTANCE));
     }
 
     #[test]

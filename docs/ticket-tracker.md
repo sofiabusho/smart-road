@@ -8,7 +8,7 @@
 > - **A/B/C**: Parallel developer tracks (see §2)
 > - **🔗**: Cross-track dependency — external ticket must be ✅ first
 
-Last refreshed: 2026-06-24 (A01–A08 ✅, B01–B05 ✅, C01–C06 ✅, C08 ✅)
+Last refreshed: 2026-06-24 (all tickets ✅ — Gate G2)
 
 ---
 
@@ -127,7 +127,7 @@ Execution order:
 | C04 | ✅ | **Sustained traffic**: R ≥1 min, congestion cap | M | C02, A06 🔗 | REQ-3 · AUD-16, AUD-17 | AUD-16, AUD-17 | C |
 | C05 | ✅ | **Stats collector**: min/max velocity, crossing times, close calls | M | C01 | REQ-20–REQ-26 | AUD-20–AUD-24 | C |
 | C06 | ✅ | **Stats window on Esc**: display all fields | M | C05 | REQ-17, REQ-19 · AUD-18, AUD-19 | AUD-18–AUD-24, AUD-25 | C |
-| C07 | ⬜ | **Audit dry-run**: full AUD-1–AUD-31 pass, README runbook | S | C06, A07 🔗, C03 🔗, C04 🔗 | NFR-5 · AUD-1–AUD-31 | Gate G2 | C |
+| C07 | ✅ | **Audit dry-run**: full AUD-1–AUD-31 pass, README runbook | S | C06, A07 🔗, C03 🔗, C04 🔗 | NFR-5 · AUD-1–AUD-31 | Gate G2 | C |
 | C08 | ✅ | **Extra statistics** *(bonus)* | S | C05 | REQ-B2 · AUD-B1 | AUD-B1 | C |
 
 **Intra-track chain**: C01 → C02 → C03; C01 → C05 → C06 → C07.
@@ -170,7 +170,7 @@ No circular dependencies.
 | When | Pick up | Blocked by |
 |------|---------|------------|
 | ~~**Start**~~ | ~~**A01**~~ ✅ · ~~**A02**~~ ✅ · ~~**A03**~~ ✅ · ~~**A04**~~ ✅ · ~~**A05**~~ ✅ · ~~**A06**~~ ✅ | — |
-| **Now** | **A07** (turn animation) | — |
+| ~~**Now**~~ | ~~**A07**~~ ✅ (turn animation) | — |
 | Anytime after A03 ✅ | ~~**A08**~~ ✅ *(bonus)* | — |
 
 ### Dev B (Vehicle simulation)
@@ -191,7 +191,7 @@ No circular dependencies.
 | After C02 ✅ | **C03** ∥ **C04** (C04 also needs A06 ✅) | A06 🔗 for C04 |
 | After C05 ✅ | ~~**C06**~~ ✅ · ~~**C08**~~ ✅ | — |
 | After C01 ✅ | ~~**C05**~~ ✅ (can overlap with C02) | — |
-| After C06 + A07 + C03 + C04 ✅ | **C07** | A07 🔗, C03, C04 |
+| After C06 + A07 + C03 + C04 ✅ | ~~**C07**~~ ✅ | — |
 | After C05 ✅ | ~~**C08**~~ ✅ *(bonus)* | — |
 
 ---
@@ -328,19 +328,7 @@ No circular dependencies.
 
 ## Immediate Next Work Queue
 
-### Dev A
-
-1. **A07** — turn animation (B02 ✅ unblocks)
-2. **A03** ✅ · **A02** ✅ · **A01** ✅ · **A04** ✅ · **A05** ✅ · **A06** ✅ — scaffolding through random spawn complete
-
-### Dev B
-
-1. ~~**B05**~~ ✅ *(bonus)* — acceleration / deceleration
-2. **B01**–**B04** ✅ — physics through safe distance complete
-
-### Dev C
-
-1. **C07** — audit dry-run (C06 ✅, C03 ✅, C04 ✅; blocked on A07)
+All mandatory tickets complete (**Gate G2**). Optional maintenance: B05/smart ramp integration (AUD-B3 full), README Windows SDL2 PATH note for `manual_stats_window`.
 
 ---
 
