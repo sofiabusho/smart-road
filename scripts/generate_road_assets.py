@@ -102,35 +102,14 @@ def solid_horizontal(pixels: list, y: int) -> None:
         pixels[y][x] = MARKING
 
 
-def road_vertical(width: int, height: int, lane_width: int) -> list[list[tuple[int, int, int]]]:
-    """Six-lane vertical arm: inbound (west) + outbound (east) with center divider."""
-    pixels = fill(width, height, ASPHALT)
-    inbound_lanes = 3
-    # Inbound lane dividers (west half).
-    dashed_vertical(pixels, lane_width)
-    dashed_vertical(pixels, lane_width * 2)
-    # Center divider (double solid).
-    mid = inbound_lanes * lane_width
-    solid_vertical(pixels, mid - 1)
-    solid_vertical(pixels, mid)
-    # Outbound lane dividers (east half).
-    dashed_vertical(pixels, mid + lane_width)
-    dashed_vertical(pixels, mid + lane_width * 2)
-    return pixels
+def road_vertical(width: int, height: int, _lane_width: int) -> list[list[tuple[int, int, int]]]:
+    """Plain asphalt — lane markings are drawn in `render.rs` on approach arms."""
+    return fill(width, height, ASPHALT)
 
 
-def road_horizontal(width: int, height: int, lane_width: int) -> list[list[tuple[int, int, int]]]:
-    """Six-lane horizontal arm: inbound (north) + outbound (south) with center divider."""
-    pixels = fill(width, height, ASPHALT)
-    inbound_lanes = 3
-    dashed_horizontal(pixels, lane_width)
-    dashed_horizontal(pixels, lane_width * 2)
-    mid = inbound_lanes * lane_width
-    solid_horizontal(pixels, mid - 1)
-    solid_horizontal(pixels, mid)
-    dashed_horizontal(pixels, mid + lane_width)
-    dashed_horizontal(pixels, mid + lane_width * 2)
-    return pixels
+def road_horizontal(width: int, height: int, _lane_width: int) -> list[list[tuple[int, int, int]]]:
+    """Plain asphalt — lane markings are drawn in `render.rs` on approach arms."""
+    return fill(width, height, ASPHALT)
 
 
 def intersection_core(size: int, lane_width: int) -> list[list[tuple[int, int, int]]]:
