@@ -294,6 +294,8 @@ mod tests {
             distance_in_crossing: 0.0,
             time_in_crossing: 1.5,
             reservation_granted: true,
+            scheduler_yield: false,
+            reservation_hold: false,
         };
 
         session.observe_vehicles(std::slice::from_ref(&vehicle), 0.0);
@@ -359,6 +361,8 @@ mod tests {
                 distance_in_crossing: 0.0,
                 time_in_crossing: 0.0,
                 reservation_granted: true,
+                scheduler_yield: false,
+                reservation_hold: false,
             },
             Vehicle {
                 id: VehicleId(2),
@@ -375,6 +379,8 @@ mod tests {
                 distance_in_crossing: 0.0,
                 time_in_crossing: 0.0,
                 reservation_granted: true,
+                scheduler_yield: false,
+                reservation_hold: false,
             },
         ];
 

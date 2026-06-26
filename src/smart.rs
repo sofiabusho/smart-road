@@ -4,7 +4,10 @@ use std::collections::{HashMap, HashSet};
 
 use crate::config::{RESERVATION_TRIGGER_DISTANCE, SAFE_DISTANCE};
 use crate::intersection::{Cardinal, IntersectionModel, LaneId, Vec2};
-use crate::vehicle::{apply_reservation_braking, Vehicle, VehicleState, VelocityLevel};
+use crate::vehicle::{
+    apply_reservation_braking, retract_vehicle_outside_zone, sprite_separation_gap, Vehicle,
+    VehicleState, SCHEDULER_CLEAR_GAP, SCHEDULER_SPRITE_GAP_THRESHOLD,
+};
 
 /// Coordinates AV passage without traffic lights (C01 detection, C02 scheduling).
 #[derive(Debug)]
@@ -44,6 +47,8 @@ impl SmartController {
         vehicle.time_in_crossing = 0.0;
         vehicle.distance_in_crossing = 0.0;
         vehicle.commanded_velocity = vehicle.nominal_velocity;
+        vehicle.scheduler_yield = false;
+        vehicle.reservation_hold = false;
         self.entry_sequence.insert(vehicle.id, self.next_entry_seq);
         self.next_entry_seq += 1;
     }
@@ -62,6 +67,7 @@ impl SmartController {
             if vehicle.state == VehicleState::Managed && !in_zone {
                 vehicle.state = VehicleState::Exiting;
                 vehicle.reservation_granted = false;
+                vehicle.scheduler_yield = false;
                 self.entry_sequence.remove(&vehicle.id);
                 self.wait_order.remove(&vehicle.id);
             }
@@ -69,28 +75,50 @@ impl SmartController {
 
         self.expand_reservations(vehicles, model);
 
-        for vehicle in vehicles.iter_mut() {
-            if vehicle.state != VehicleState::Approaching {
-                continue;
-            }
-
-            let in_zone = point_in_polygon(vehicle.position, &model.zone_polygon);
-            let distance_to_zone = distance_to_zone_entry(model, vehicle);
-
-            if in_zone {
-                if !vehicle.reservation_granted {
-                    vehicle.commanded_velocity = 0.0;
-                    vehicle.velocity = vehicle.velocity.min(0.0);
+        for idx in 0..vehicles.len() {
+            if vehicles[idx].state != VehicleState::Approaching {
+                if vehicles[idx].reservation_hold {
+                    vehicles[idx].reservation_hold = false;
                 }
                 continue;
             }
 
+            if vehicles[idx].reservation_granted {
+                vehicles[idx].reservation_hold = false;
+                continue;
+            }
+
+            let in_zone = point_in_polygon(vehicles[idx].position, &model.zone_polygon);
+            let distance_to_zone = distance_to_zone_entry(model, &vehicles[idx]);
+            let blocked = self.reservation_blocked(&vehicles[idx], vehicles, model);
+
+            if in_zone {
+                vehicles[idx].reservation_hold = true;
+                vehicles[idx].commanded_velocity = 0.0;
+                vehicles[idx].velocity = 0.0;
+                continue;
+            }
+
+            if blocked {
+                let stop_buffer =
+                    vehicles[idx].velocity * crate::config::FIXED_TIMESTEP_SECS + 2.0;
+                let near_stop = distance_to_zone
+                    .map(|d| d > 0.0 && d <= SAFE_DISTANCE + stop_buffer)
+                    .unwrap_or(false);
+                if vehicles[idx].reservation_hold || near_stop {
+                    vehicles[idx].reservation_hold = true;
+                    vehicles[idx].commanded_velocity = 0.0;
+                    vehicles[idx].velocity = 0.0;
+                    continue;
+                }
+            } else {
+                vehicles[idx].reservation_hold = false;
+            }
+
             if let Some(dist) = distance_to_zone {
                 if dist > 0.0 && dist <= RESERVATION_TRIGGER_DISTANCE {
-                    self.track_waiter(vehicle.id);
-                    if !vehicle.reservation_granted {
-                        apply_reservation_braking(vehicle, dist);
-                    }
+                    self.track_waiter(vehicles[idx].id);
+                    apply_reservation_braking(&mut vehicles[idx], dist);
                 }
             }
         }
@@ -113,7 +141,8 @@ impl SmartController {
     pub fn managed_scheduler_yielded(vehicles: &[Vehicle]) -> bool {
         vehicles.iter().any(|vehicle| {
             vehicle.state == VehicleState::Managed
-                && (vehicle.commanded_velocity + 0.01 < vehicle.nominal_velocity
+                && (vehicle.scheduler_yield
+                    || vehicle.commanded_velocity + 0.01 < vehicle.nominal_velocity
                     || vehicle.commanded_velocity < 1.0)
         })
     }
@@ -129,7 +158,7 @@ impl SmartController {
                 if vehicles[j].state != VehicleState::Managed {
                     continue;
                 }
-                if center_distance(&vehicles[i], &vehicles[j]) < SAFE_DISTANCE * 1.5 {
+                if sprite_separation_gap(&vehicles[i], &vehicles[j]) < SCHEDULER_SPRITE_GAP_THRESHOLD {
                     return true;
                 }
             }
@@ -139,10 +168,17 @@ impl SmartController {
 
     /// Command velocities for vehicles inside the managed zone (C02 / REQ-3, REQ-9).
     fn schedule_managed_velocities(&self, vehicles: &mut [Vehicle]) {
-        let yield_speed = VelocityLevel::Yield.speed();
-
         for vehicle in vehicles.iter_mut() {
-            if vehicle.state == VehicleState::Managed {
+            if vehicle.state != VehicleState::Managed {
+                if vehicle.scheduler_yield {
+                    vehicle.scheduler_yield = false;
+                }
+                continue;
+            }
+            if vehicle.scheduler_yield {
+                vehicle.commanded_velocity = 0.0;
+                vehicle.velocity = 0.0;
+            } else {
                 vehicle.commanded_velocity = vehicle.nominal_velocity;
             }
         }
@@ -163,8 +199,8 @@ impl SmartController {
                     continue;
                 }
 
-                let gap = center_distance(&vehicles[i], &vehicles[j]);
-                if gap >= SAFE_DISTANCE * 1.5 {
+                let gap = sprite_separation_gap(&vehicles[i], &vehicles[j]);
+                if gap >= SCHEDULER_SPRITE_GAP_THRESHOLD {
                     continue;
                 }
 
@@ -175,13 +211,40 @@ impl SmartController {
                     (Some(a), Some(b)) if a < b => j,
                     _ => continue,
                 };
-                let target = if gap <= SAFE_DISTANCE {
-                    0.0
-                } else {
-                    yield_speed
-                };
-                vehicles[yielder].commanded_velocity =
-                    vehicles[yielder].commanded_velocity.min(target);
+
+                vehicles[yielder].scheduler_yield = true;
+                vehicles[yielder].commanded_velocity = 0.0;
+                vehicles[yielder].velocity = 0.0;
+            }
+        }
+
+        for i in 0..len {
+            if !vehicles[i].scheduler_yield || vehicles[i].state != VehicleState::Managed {
+                continue;
+            }
+            let mut clear = true;
+            for j in 0..len {
+                if i == j {
+                    continue;
+                }
+                if vehicles[j].state != VehicleState::Managed
+                    && vehicles[j].state != VehicleState::Exiting
+                {
+                    continue;
+                }
+                let pair = lane_pair_key(vehicles[i].lane_id, vehicles[j].lane_id);
+                let same_lane = vehicles[i].lane_id == vehicles[j].lane_id;
+                if !same_lane && !self.lane_conflicts.contains(&pair) {
+                    continue;
+                }
+                if sprite_separation_gap(&vehicles[i], &vehicles[j]) < SCHEDULER_CLEAR_GAP {
+                    clear = false;
+                    break;
+                }
+            }
+            if clear {
+                vehicles[i].scheduler_yield = false;
+                vehicles[i].commanded_velocity = vehicles[i].nominal_velocity;
             }
         }
     }
@@ -268,36 +331,22 @@ impl SmartController {
 
     /// Push unreserved vehicles back outside the junction after physics overshoot.
     pub fn enforce_zone_gate(vehicles: &mut [Vehicle], model: &IntersectionModel) {
-        let (min_x, max_x, min_y, max_y) = zone_bounds(&model.zone_polygon);
-        const MARGIN: f32 = 2.0;
-
         for vehicle in vehicles.iter_mut() {
             if vehicle.state != VehicleState::Approaching || vehicle.reservation_granted {
                 continue;
             }
-            if !point_in_polygon(vehicle.position, &model.zone_polygon) {
+            if !model.point_in_zone(vehicle.position) {
                 continue;
             }
             vehicle.velocity = 0.0;
             vehicle.commanded_velocity = 0.0;
-            match vehicle.approach {
-                Cardinal::South => vehicle.position.y = max_y + MARGIN,
-                Cardinal::North => vehicle.position.y = min_y - MARGIN,
-                Cardinal::East => vehicle.position.x = max_x + MARGIN,
-                Cardinal::West => vehicle.position.x = min_x - MARGIN,
-            }
+            retract_vehicle_outside_zone(vehicle, model);
         }
     }
 }
 
 fn lane_pair_key(a: LaneId, b: LaneId) -> (u32, u32) {
     (a.0.min(b.0), a.0.max(b.0))
-}
-
-fn center_distance(a: &Vehicle, b: &Vehicle) -> f32 {
-    let dx = a.position.x - b.position.x;
-    let dy = a.position.y - b.position.y;
-    (dx * dx + dy * dy).sqrt()
 }
 
 fn zone_bounds(zone: &[Vec2]) -> (f32, f32, f32, f32) {
@@ -431,7 +480,9 @@ fn point_in_polygon(point: Vec2, polygon: &[Vec2]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::SAFE_DISTANCE;
     use crate::intersection::{lane_id, Cardinal, Route};
+    use crate::vehicle::VelocityLevel;
     use crate::vehicle::VehicleId;
 
     fn test_vehicle_at(position: Vec2, state: VehicleState) -> Vehicle {
@@ -450,6 +501,8 @@ mod tests {
             distance_in_crossing: 0.0,
             time_in_crossing: 0.0,
             reservation_granted: false,
+            scheduler_yield: false,
+            reservation_hold: false,
         }
     }
 
@@ -476,6 +529,8 @@ mod tests {
             distance_in_crossing: 0.0,
             time_in_crossing: 0.0,
             reservation_granted: true,
+            scheduler_yield: false,
+            reservation_hold: false,
         }
     }
 
