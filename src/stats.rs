@@ -15,7 +15,7 @@ pub struct Stats {
     pub max_crossing_time: f32,
     pub min_crossing_time: f32,
     pub close_calls: u32,
-    /// C08 bonus (REQ-B2): total session wall time in seconds.
+    /// C08 bonus (REQ-B2): total session wall time in seconds (set in `finalize_session`).
     pub session_duration_secs: f32,
     /// C08 bonus: mean crossing time across vehicles that completed.
     pub avg_crossing_time_secs: f32,

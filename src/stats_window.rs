@@ -1,6 +1,6 @@
 //! Post-session statistics window (C06).
 
-use sdl2::event::Event;
+use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
@@ -9,7 +9,7 @@ use sdl2::video::Window;
 use sdl2::Sdl;
 use std::time::Duration;
 
-use crate::config::{STATS_WINDOW_HEIGHT, STATS_WINDOW_TITLE, STATS_WINDOW_WIDTH};
+use crate::config::STATS_WINDOW_TITLE;
 use crate::stats::Stats;
 
 /// Payload for the statistics UI on `Esc` (C06).
@@ -81,11 +81,66 @@ fn format_crossing_time(value: f32, is_max: bool) -> String {
     format!("{value:.2}")
 }
 
+const MARGIN_X: i32 = 20;
+const MARGIN_Y: i32 = 20;
+const BODY_TEXT_SCALE: u32 = 2;
+const FOOTER_TEXT_SCALE: u32 = 1;
+const LINE_STEP: i32 = 24;
+const EMPTY_LINE_STEP: i32 = 8;
+const FOOTER_TOP_GAP: i32 = 12;
+const BOTTOM_MARGIN: i32 = 20;
+const FOOTER_TEXT: &str = "Press Esc or close window to exit";
+const GLYPH_W: i32 = 8;
+const GLYPH_H: i32 = 8;
+
+/// Pixel width of `text` at the given bitmap scale (matches [`draw_text`]).
+pub fn text_width_px(text: &str, scale: u32) -> i32 {
+    let scale = scale.max(1) as i32;
+    if text.is_empty() {
+        return 0;
+    }
+    let advance = GLYPH_W * scale + scale;
+    text.chars().count() as i32 * advance
+}
+
+fn text_height_px(scale: u32) -> i32 {
+    GLYPH_H * scale.max(1) as i32
+}
+
+/// Window size in pixels that fits all stat lines and the footer hint.
+pub fn stats_window_dimensions(lines: &[String]) -> (u32, u32) {
+    let mut max_width = text_width_px("Session statistics", BODY_TEXT_SCALE);
+    for line in lines {
+        if !line.is_empty() {
+            max_width = max_width.max(text_width_px(line, BODY_TEXT_SCALE));
+        }
+    }
+    max_width = max_width.max(text_width_px(FOOTER_TEXT, FOOTER_TEXT_SCALE));
+
+    let mut y = MARGIN_Y;
+    for (index, line) in lines.iter().enumerate() {
+        if index == 0 {
+            y += LINE_STEP;
+            continue;
+        }
+        if line.is_empty() {
+            y += EMPTY_LINE_STEP;
+        } else {
+            y += LINE_STEP;
+        }
+    }
+    y += FOOTER_TOP_GAP + text_height_px(FOOTER_TEXT_SCALE) + BOTTOM_MARGIN;
+
+    ((max_width + MARGIN_X * 2).max(1) as u32, y.max(1) as u32)
+}
+
 /// Show the statistics window until the user closes it or presses `Esc`.
 pub fn show_stats_window(sdl: &Sdl, summary: SessionSummary) -> Result<(), String> {
     let video = sdl.video().map_err(|e| format!("SDL video failed: {e}"))?;
+    let lines = format_stats_lines(&summary.stats);
+    let (width, height) = stats_window_dimensions(&lines);
     let window = video
-        .window(STATS_WINDOW_TITLE, STATS_WINDOW_WIDTH, STATS_WINDOW_HEIGHT)
+        .window(STATS_WINDOW_TITLE, width, height)
         .position_centered()
         .build()
         .map_err(|e| format!("stats window failed: {e}"))?;
@@ -96,16 +151,21 @@ pub fn show_stats_window(sdl: &Sdl, summary: SessionSummary) -> Result<(), Strin
         .build()
         .map_err(|e| format!("stats canvas failed: {e}"))?;
 
-    let lines = format_stats_lines(&summary.stats);
     let mut event_pump = sdl
         .event_pump()
         .map_err(|e| format!("SDL event pump failed: {e}"))?;
 
+    let stats_window_id = canvas.window().id();
     let mut running = true;
     while running {
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } => running = false,
+                Event::Window {
+                    window_id,
+                    win_event: WindowEvent::Close,
+                    ..
+                } if window_id == stats_window_id => running = false,
                 Event::KeyDown {
                     keycode: Some(Keycode::Escape),
                     ..
@@ -117,26 +177,26 @@ pub fn show_stats_window(sdl: &Sdl, summary: SessionSummary) -> Result<(), Strin
         canvas.set_draw_color(Color::RGB(28, 32, 40));
         canvas.clear();
 
-        let mut y = 20i32;
+        let mut y = MARGIN_Y;
         for (index, line) in lines.iter().enumerate() {
             let color = if index == 0 {
                 Color::RGB(240, 240, 245)
             } else if line.is_empty() {
-                y += 8;
+                y += EMPTY_LINE_STEP;
                 continue;
             } else {
                 Color::RGB(210, 215, 225)
             };
-            draw_text(&mut canvas, line, 20, y, 2, color)?;
-            y += 24;
+            draw_text(&mut canvas, line, MARGIN_X, y, BODY_TEXT_SCALE, color)?;
+            y += LINE_STEP;
         }
 
         draw_text(
             &mut canvas,
-            "Press Esc or close window to exit",
-            20,
-            y + 12,
-            1,
+            FOOTER_TEXT,
+            MARGIN_X,
+            y + FOOTER_TOP_GAP,
+            FOOTER_TEXT_SCALE,
             Color::RGB(130, 135, 150),
         )?;
 
@@ -312,6 +372,45 @@ mod tests {
         stats.peak_concurrent_in_zone = 2;
         stats.finalize_session(12.0);
         stats
+    }
+
+    #[test]
+    fn stats_window_dimensions_fit_all_content() {
+        let lines = format_stats_lines(&sample_stats());
+        let (width, height) = stats_window_dimensions(&lines);
+
+        for line in &lines {
+            if line.is_empty() {
+                continue;
+            }
+            assert!(
+                text_width_px(line, BODY_TEXT_SCALE) + MARGIN_X * 2 <= width as i32,
+                "line {:?} wider than window ({width}px)",
+                line
+            );
+        }
+        assert!(
+            text_width_px(FOOTER_TEXT, FOOTER_TEXT_SCALE) + MARGIN_X * 2 <= width as i32,
+            "footer wider than window"
+        );
+
+        let mut y = MARGIN_Y;
+        for (index, line) in lines.iter().enumerate() {
+            if index == 0 {
+                y += LINE_STEP;
+                continue;
+            }
+            if line.is_empty() {
+                y += EMPTY_LINE_STEP;
+            } else {
+                y += LINE_STEP;
+            }
+        }
+        y += FOOTER_TOP_GAP + text_height_px(FOOTER_TEXT_SCALE);
+        assert!(
+            y <= height as i32,
+            "content height {y} exceeds window height {height}"
+        );
     }
 
     #[test]

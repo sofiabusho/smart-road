@@ -5,6 +5,7 @@ use sdl2::pixels::Color;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
 use sdl2::Sdl;
+use std::time::Instant;
 
 use crate::config::{
     FIXED_TIMESTEP_SECS, SAFE_DISTANCE, WINDOW_HEIGHT, WINDOW_TITLE, WINDOW_WIDTH,
@@ -31,6 +32,7 @@ pub struct App {
     stats: StatsSession,
     input: InputState,
     session_time: f32,
+    session_started: Instant,
 }
 
 impl App {
@@ -65,6 +67,7 @@ impl App {
             stats: StatsSession::new(),
             input: InputState::new(),
             session_time: 0.0,
+            session_started: Instant::now(),
         };
 
         let mut show_stats_on_exit = false;
@@ -182,6 +185,6 @@ impl App {
 /// Capture session metrics for the post-`Esc` statistics window (SDS §13.4).
 pub fn end_session(app: &App) -> SessionSummary {
     let mut stats = app.stats.stats.clone();
-    stats.finalize_session(app.session_time);
+    stats.finalize_session(app.session_started.elapsed().as_secs_f32());
     session_summary_from(stats)
 }
