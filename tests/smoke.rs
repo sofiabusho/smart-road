@@ -15,7 +15,7 @@ use smart_road::stats::StatsSession;
 use smart_road::stats_window::format_stats_lines;
 use smart_road::vehicle::{clamp_velocity_for_proximity, sprite_separation_gap, VehicleState};
 
-/// One simulation tick: smart → physics → zone gate → smart (post-move reservations).
+/// One simulation tick: smart (schedule) → physics → zone gate → proximity clamp.
 fn simulation_tick(
     spawn: &mut SpawnSystem,
     smart: &mut SmartController,
@@ -24,8 +24,7 @@ fn simulation_tick(
     smart.update(spawn.vehicles_mut(), model, FIXED_TIMESTEP_SECS);
     let exited = spawn.update(model, FIXED_TIMESTEP_SECS);
     SmartController::enforce_zone_gate(spawn.vehicles_mut(), model);
-    smart.update(spawn.vehicles_mut(), model, FIXED_TIMESTEP_SECS);
-    clamp_velocity_for_proximity(spawn.vehicles_mut());
+    clamp_velocity_for_proximity(spawn.vehicles_mut(), model);
     exited
 }
 #[test]
@@ -543,6 +542,8 @@ fn crate_smoke_aud15_scheduler_yields_without_proximity_clamp() {
         distance_in_crossing: 0.0,
         time_in_crossing: 0.0,
         reservation_granted: false,
+        scheduler_yield: false,
+        reservation_hold: false,
     }];
     smart.update(&mut vehicles, &model, FIXED_TIMESTEP_SECS);
     assert_eq!(
@@ -568,6 +569,8 @@ fn crate_smoke_aud15_scheduler_yields_without_proximity_clamp() {
         distance_in_crossing: 0.0,
         time_in_crossing: 0.0,
         reservation_granted: true,
+        scheduler_yield: false,
+        reservation_hold: false,
     };
     smart.register_managed_entry(east.id, 1);
     vehicles.push(east);
@@ -933,4 +936,65 @@ fn crate_smoke_audit19_stats_window_is_separate_surface() {
         "AUD-19: stats window must be a separate surface from the simulation window"
     );
     assert!(STATS_WINDOW_TITLE.contains("statistics"));
+}
+
+/// Cross-traffic waiter must not creep while blocked at the junction (↑ then →).
+#[test]
+fn crate_smoke_cross_traffic_waiter_stays_still() {
+    let model = IntersectionModel::new();
+    let mut spawn = SpawnSystem::new();
+    let mut smart = SmartController::new();
+
+    spawn
+        .try_spawn(SpawnRequest::new(Cardinal::South, Route::Straight), &model)
+        .unwrap();
+    spawn
+        .try_spawn(SpawnRequest::new(Cardinal::West, Route::Straight), &model)
+        .unwrap();
+
+    let mut max_wait_delta = 0.0f32;
+
+    for _ in 0..900 {
+        let before: Vec<_> = spawn
+            .vehicles()
+            .iter()
+            .map(|v| {
+                (
+                    v.id,
+                    v.position,
+                    v.reservation_granted,
+                    v.reservation_hold,
+                    v.scheduler_yield,
+                )
+            })
+            .collect();
+
+        simulation_tick(&mut spawn, &mut smart, &model);
+
+        let after = spawn.vehicles();
+        for (id, pos, _granted, hold, sched_yield) in before {
+            let Some(v) = after.iter().find(|x| x.id == id) else {
+                continue;
+            };
+            let dx = v.position.x - pos.x;
+            let dy = v.position.y - pos.y;
+            let delta = (dx * dx + dy * dy).sqrt();
+
+            let waiting =
+                hold || v.reservation_hold || sched_yield || v.scheduler_yield;
+
+            if waiting {
+                max_wait_delta = max_wait_delta.max(delta);
+            }
+        }
+
+        if spawn.vehicles().is_empty() {
+            break;
+        }
+    }
+
+    assert!(
+        max_wait_delta < 0.01,
+        "blocked cross-traffic waiter moved {max_wait_delta:.4} px in one frame"
+    );
 }
