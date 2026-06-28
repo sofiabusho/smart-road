@@ -261,16 +261,10 @@ pub(crate) fn exit_cardinal_for_turn(approach: Cardinal, route: Route) -> Cardin
     }
 }
 
-fn off_screen_for_cardinal(cardinal: Cardinal, lane_line: f32) -> Vec2 {
-    match cardinal {
-        Cardinal::West => off_screen_west(lane_line),
-        Cardinal::East => off_screen_east(lane_line),
-        Cardinal::North => off_screen_north(lane_line),
-        Cardinal::South => off_screen_south(lane_line),
-    }
-}
-
-/// Right turn: spawn → junction entry → corner connector → off-screen (4 points).
+/// Right turn: spawn → junction entry → interior (axial through junction) → exit lane → off-screen.
+///
+/// Uses the same multi-segment layout as left turns so the vehicle completes its approach
+/// axis before turning onto the outbound arm (no diagonal corner cut).
 fn build_right_turn_path(approach: Cardinal) -> Vec<Vec2> {
     let spawn = spawn_point_for(approach, Route::Right);
     let exit = exit_cardinal_for_turn(approach, Route::Right);
@@ -281,51 +275,48 @@ fn build_right_turn_path(approach: Cardinal) -> Vec<Vec2> {
     let jy_n = INTERSECTION_CENTER_Y - INTERSECTION_HALF_SIZE;
     let jy_s = INTERSECTION_CENTER_Y + INTERSECTION_HALF_SIZE;
 
-    let (entry, connector) = match approach {
+    match approach {
         Cardinal::North => {
             let lane_x = spawn.x;
-            let connector = match exit {
-                Cardinal::West => Vec2::new(jx_w, outbound),
-                Cardinal::East => Vec2::new(jx_e, outbound),
-                Cardinal::North | Cardinal::South => unreachable!(),
-            };
-            (Vec2::new(lane_x, jy_n), connector)
+            vec![
+                spawn,
+                Vec2::new(lane_x, jy_n),
+                Vec2::new(lane_x, outbound),
+                Vec2::new(jx_w, outbound),
+                off_screen_west(outbound),
+            ]
         }
         Cardinal::South => {
             let lane_x = spawn.x;
-            let connector = match exit {
-                Cardinal::West => Vec2::new(jx_w, outbound),
-                Cardinal::East => Vec2::new(jx_e, outbound),
-                Cardinal::North | Cardinal::South => unreachable!(),
-            };
-            (Vec2::new(lane_x, jy_s), connector)
+            vec![
+                spawn,
+                Vec2::new(lane_x, jy_s),
+                Vec2::new(lane_x, outbound),
+                Vec2::new(jx_e, outbound),
+                off_screen_east(outbound),
+            ]
         }
         Cardinal::East => {
             let lane_y = spawn.y;
-            let connector = match exit {
-                Cardinal::North => Vec2::new(outbound, jy_n),
-                Cardinal::South => Vec2::new(outbound, jy_s),
-                Cardinal::East | Cardinal::West => unreachable!(),
-            };
-            (Vec2::new(jx_e, lane_y), connector)
+            vec![
+                spawn,
+                Vec2::new(jx_e, lane_y),
+                Vec2::new(outbound, lane_y),
+                Vec2::new(outbound, jy_n),
+                off_screen_north(outbound),
+            ]
         }
         Cardinal::West => {
             let lane_y = spawn.y;
-            let connector = match exit {
-                Cardinal::North => Vec2::new(outbound, jy_n),
-                Cardinal::South => Vec2::new(outbound, jy_s),
-                Cardinal::East | Cardinal::West => unreachable!(),
-            };
-            (Vec2::new(jx_w, lane_y), connector)
+            vec![
+                spawn,
+                Vec2::new(jx_w, lane_y),
+                Vec2::new(outbound, lane_y),
+                Vec2::new(outbound, jy_s),
+                off_screen_south(outbound),
+            ]
         }
-    };
-
-    vec![
-        spawn,
-        entry,
-        connector,
-        off_screen_for_cardinal(exit, outbound),
-    ]
+    }
 }
 
 /// Left turn: spawn → junction entry → interior (axial through junction) → exit lane → off-screen.
@@ -694,8 +685,7 @@ mod tests {
         for lane in &model.lanes {
             let expected = match lane.route {
                 Route::Straight => continue,
-                Route::Right => 4,
-                Route::Left => 5,
+                Route::Right | Route::Left => 5,
             };
             assert_eq!(
                 lane.path.len(),
@@ -715,8 +705,7 @@ mod tests {
                 continue;
             }
             let axial_segments = match lane.route {
-                Route::Right => 2,
-                Route::Left => 3,
+                Route::Right | Route::Left => 3,
                 Route::Straight => unreachable!(),
             };
             for w in lane.path.windows(2).take(axial_segments) {

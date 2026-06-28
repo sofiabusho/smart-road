@@ -799,12 +799,13 @@ mod tests {
 
     #[test]
     fn faster_commanded_velocity_drives_strictly_greater_distance() {
-        // B03: proves commanded_velocity drives motion via integrate_physics (B05 ramps
-        // velocity toward command when they differ; at spawn they are equal).
-        let mut yield_v = make_vehicle(1, VelocityLevel::Yield.speed());
-        let mut fast_v = make_vehicle(2, VelocityLevel::Fast.speed());
+        // B03: at equal current speed, Fast travels farther than Yield in one tick.
+        let mut yield_v = make_vehicle(2, VelocityLevel::Yield.speed());
+        let mut fast_v = make_vehicle(0, VelocityLevel::Fast.speed());
+        yield_v.velocity = yield_v.commanded_velocity;
+        fast_v.velocity = fast_v.commanded_velocity;
 
-        let dt = 1.0_f32;
+        let dt = crate::config::FIXED_TIMESTEP_SECS;
         integrate_physics(&mut yield_v, dt);
         integrate_physics(&mut fast_v, dt);
 

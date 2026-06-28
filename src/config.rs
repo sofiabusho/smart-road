@@ -40,8 +40,8 @@ pub const ROAD_ARM_WIDTH: f32 = LANE_WIDTH * LANES_PER_ARM as f32;
 /// Half-width of the junction box (smart-system zone) in world units.
 pub const INTERSECTION_HALF_SIZE: f32 = ROAD_ARM_WIDTH / 2.0;
 
-/// Distance from window edge to the near end of each approach arm.
-pub const APPROACH_MARGIN: f32 = 48.0;
+/// Distance from window edge to the near end of each approach arm (0 = asphalt flush to edge).
+pub const APPROACH_MARGIN: f32 = 0.0;
 
 /// Intersection center in world coordinates.
 pub const INTERSECTION_CENTER_X: f32 = WINDOW_WIDTH as f32 / 2.0;
@@ -55,8 +55,7 @@ pub const APPROACH_ARM_LENGTH: f32 =
 pub const EW_ARM_LENGTH: f32 = INTERSECTION_CENTER_X - INTERSECTION_HALF_SIZE - APPROACH_MARGIN;
 
 /// Default cruise speed for newly spawned vehicles (world units per second).
-/// Mid-scale between the original slow tuning (~3.5) and the full world-unit cap (120).
-/// Three spawn levels (B03): Fast ×1.4, Cruise ×1.0, Yield ×0.5 → 84 / 60 / 30 px/s.
+/// Three spawn levels (B03): Fast ×1.4, Cruise ×1.0, Yield ×0.5 → 224 / 160 / 80 px/s at this base.
 pub const DEFAULT_SPAWN_VELOCITY: f32 = 160.0;
 
 /// Minimum milliseconds between spawns on the same approach (REQ-18).

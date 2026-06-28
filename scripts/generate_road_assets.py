@@ -146,7 +146,7 @@ def main() -> None:
     lane_width = 40
     lanes_per_approach = 3
     lanes_per_arm = lanes_per_approach * 2
-    approach_margin = 48
+    approach_margin = 0
 
     road_arm_width = lane_width * lanes_per_arm
     ns_arm_length = window_height // 2 - road_arm_width // 2 - approach_margin
