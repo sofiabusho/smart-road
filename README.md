@@ -125,9 +125,9 @@ assets/
 
 | Level | Speed (world units/s) |
 |-------|----------------------|
-| Fast | ≈ 4.9 |
-| Cruise | ≈ 3.5 |
-| Yield | ≈ 1.75 |
+| Fast | ≈ 84 |
+| Cruise | ≈ 60 |
+| Yield | ≈ 30 |
 
 Each vehicle also has a distinct acceleration/deceleration profile, so braking ramps gradually rather than snapping.
 

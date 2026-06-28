@@ -55,7 +55,9 @@ pub const APPROACH_ARM_LENGTH: f32 =
 pub const EW_ARM_LENGTH: f32 = INTERSECTION_CENTER_X - INTERSECTION_HALF_SIZE - APPROACH_MARGIN;
 
 /// Default cruise speed for newly spawned vehicles (world units per second).
-pub const DEFAULT_SPAWN_VELOCITY: f32 = 120.0;
+/// Mid-scale between the original slow tuning (~3.5) and the full world-unit cap (120).
+/// Three spawn levels (B03): Fast ×1.4, Cruise ×1.0, Yield ×0.5 → 84 / 60 / 30 px/s.
+pub const DEFAULT_SPAWN_VELOCITY: f32 = 60.0;
 
 /// Minimum milliseconds between spawns on the same approach (REQ-18).
 pub const SPAWN_COOLDOWN_MS: u64 = 400;
@@ -71,10 +73,10 @@ pub const VEHICLE_LENGTH: f32 = 36.0;
 pub const SAFE_DISTANCE: f32 = 40.0;
 
 /// Maximum acceleration toward commanded speed (world units/s²). B05 scales per vehicle.
-pub const BASE_ACCELERATION: f32 = 180.0;
+pub const BASE_ACCELERATION: f32 = 90.0;
 
 /// Maximum deceleration toward commanded speed (world units/s²). B05 scales per vehicle.
-pub const BASE_DECELERATION: f32 = 240.0;
+pub const BASE_DECELERATION: f32 = 120.0;
 
 /// Distance before the junction stop line where reservation gating begins (world units).
 pub const RESERVATION_TRIGGER_DISTANCE: f32 = 200.0;
