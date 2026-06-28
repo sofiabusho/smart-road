@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use sdl2::keyboard::Keycode;
 use smart_road::config::{
-    FIXED_TIMESTEP_SECS, SPAWN_COOLDOWN_MS, STATS_WINDOW_TITLE, TARGET_FPS, VEHICLE_LENGTH,
-    WINDOW_HEIGHT, WINDOW_TITLE, WINDOW_WIDTH,
+    APPROACH_ARM_LENGTH, DEFAULT_SPAWN_VELOCITY, FIXED_TIMESTEP_SECS, SPAWN_COOLDOWN_MS,
+    STATS_WINDOW_TITLE, TARGET_FPS, VEHICLE_LENGTH, WINDOW_HEIGHT, WINDOW_TITLE, WINDOW_WIDTH,
 };
 use smart_road::input::{approach_for_arrow, InputEvent, InputState};
 use smart_road::intersection::{lane_id, Cardinal, IntersectionModel, Route, Vec2};
@@ -103,7 +103,10 @@ fn crate_smoke_spawn_smart_detection_pipeline() {
         .try_spawn(SpawnRequest::new(Cardinal::South, Route::Straight), &model)
         .expect("spawn succeeds");
     assert_eq!(spawn.vehicles()[0].state, VehicleState::Approaching);
-    for _ in 0..200 {
+    let frames_to_zone = ((APPROACH_ARM_LENGTH / DEFAULT_SPAWN_VELOCITY) / FIXED_TIMESTEP_SECS)
+        .ceil() as u32
+        + 60;
+    for _ in 0..frames_to_zone {
         simulation_tick(&mut spawn, &mut smart, &model);
         if spawn.vehicles()[0].state == VehicleState::Managed {
             break;
