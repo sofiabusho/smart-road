@@ -72,11 +72,22 @@ impl App {
 
         let mut show_stats_on_exit = false;
         while app.running {
+            let frame_start = Instant::now();
             app.poll_events()?;
             if app.update() {
                 show_stats_on_exit = true;
             }
             app.draw(&mut canvas, &road_assets)?;
+
+            // Cap the loop to TARGET_FPS so each update() tick matches one real frame.
+            // Without this, fast machines run many sim ticks per wall-clock second and
+            // `time_in_crossing` reads ~2× (or more) what a stopwatch measures (AUD-26).
+            let frame_budget =
+                std::time::Duration::from_secs_f32(FIXED_TIMESTEP_SECS);
+            let elapsed = frame_start.elapsed();
+            if elapsed < frame_budget {
+                std::thread::sleep(frame_budget - elapsed);
+            }
         }
 
         if show_stats_on_exit {
