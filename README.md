@@ -189,3 +189,10 @@ Manual spot-checks required for AUD-1–2 (visual assets), AUD-7 (varied random 
 ## License
 
 MIT
+
+
+## Authors
+
+Iana Kopylova 👸
+Andriana Stas 👑
+Sofia Busho 🫰
