@@ -159,11 +159,16 @@ impl SpawnSystem {
         }
 
         let lane = model.lane(req.lane_id)?;
+        let spawn_pos = spawn_position_on_lane(lane, &self.vehicles);
+        if same_lane_spawn_too_close(spawn_pos, lane, &self.vehicles) {
+            return None;
+        }
+
         let id = VehicleId(self.next_id);
         self.next_id += 1;
 
         let mut vehicle = spawn_vehicle(id, lane, crate::config::DEFAULT_SPAWN_VELOCITY);
-        vehicle.position = spawn_position_on_lane(lane, &self.vehicles);
+        vehicle.position = spawn_pos;
         self.vehicles.push(vehicle);
         self.cooldown.record(req.approach);
         Some(id)
@@ -191,7 +196,6 @@ impl SpawnSystem {
     /// Advance movement along lane paths and remove vehicles that left the canvas.
     pub fn update(&mut self, model: &IntersectionModel, dt: f32) -> Vec<VehicleExit> {
         crate::vehicle::enforce_follow_distance(&mut self.vehicles, crate::config::SAFE_DISTANCE);
-        crate::vehicle::clamp_velocity_for_proximity(&mut self.vehicles);
         let mut exited = Vec::new();
 
         for vehicle in &mut self.vehicles {
@@ -209,7 +213,6 @@ impl SpawnSystem {
                 vehicle.state = VehicleState::Done;
             }
         }
-        crate::vehicle::clamp_velocity_for_proximity(&mut self.vehicles);
         self.vehicles.retain(|v| v.state != VehicleState::Done);
         exited
     }
@@ -242,11 +245,31 @@ impl Default for SpawnSystem {
     }
 }
 
+/// True when `spawn_pos` is closer than safe distance to any same-lane vehicle.
+fn same_lane_spawn_too_close(
+    spawn_pos: Vec2,
+    lane: &crate::intersection::LaneInfo,
+    existing: &[Vehicle],
+) -> bool {
+    let heading = lane.approach.travel_heading();
+    for vehicle in existing {
+        if vehicle.lane_id != lane.id || vehicle.state == VehicleState::Done {
+            continue;
+        }
+        let dx = vehicle.position.x - spawn_pos.x;
+        let dy = vehicle.position.y - spawn_pos.y;
+        let along = (dx * heading.cos() + dy * heading.sin()).abs();
+        if along < crate::config::SAFE_DISTANCE {
+            return true;
+        }
+    }
+    false
+}
+
 /// Place a new vehicle behind the rearmost same-lane queue near the spawn point (AUD-8).
 fn spawn_position_on_lane(lane: &crate::intersection::LaneInfo, existing: &[Vehicle]) -> Vec2 {
     let heading = lane.approach.travel_heading();
     let mut position = lane.spawn_point;
-
     let mut rearmost: Option<&Vehicle> = None;
     let mut smallest_along = f32::INFINITY;
 
@@ -257,7 +280,7 @@ fn spawn_position_on_lane(lane: &crate::intersection::LaneInfo, existing: &[Vehi
         let dx = vehicle.position.x - lane.spawn_point.x;
         let dy = vehicle.position.y - lane.spawn_point.y;
         let along = dx * heading.cos() + dy * heading.sin();
-        if along >= 0.0 && along < smallest_along {
+        if along < smallest_along {
             smallest_along = along;
             rearmost = Some(vehicle);
         }
@@ -266,8 +289,8 @@ fn spawn_position_on_lane(lane: &crate::intersection::LaneInfo, existing: &[Vehi
     if let Some(leader) = rearmost {
         if smallest_along < crate::config::SAFE_DISTANCE * 4.0 {
             position = Vec2::new(
-                leader.position.x - crate::config::SAFE_DISTANCE * 1.5 * heading.cos(),
-                leader.position.y - crate::config::SAFE_DISTANCE * 1.5 * heading.sin(),
+                leader.position.x - crate::config::SAFE_DISTANCE * 2.0 * heading.cos(),
+                leader.position.y - crate::config::SAFE_DISTANCE * 2.0 * heading.sin(),
             );
         }
     }

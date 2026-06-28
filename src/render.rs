@@ -9,8 +9,8 @@ use sdl2::surface::Surface;
 use sdl2::video::{Window, WindowContext};
 
 use crate::config::{
-    APPROACH_MARGIN, INTERSECTION_CENTER_X, INTERSECTION_CENTER_Y, ROAD_ARM_WIDTH, VEHICLE_LENGTH,
-    VEHICLE_WIDTH,
+    APPROACH_MARGIN, INTERSECTION_CENTER_X, INTERSECTION_CENTER_Y, LANE_WIDTH, ROAD_ARM_WIDTH,
+    VEHICLE_LENGTH, VEHICLE_WIDTH,
 };
 use crate::intersection::{Cardinal, IntersectionModel, Route, VehicleRenderSnapshot};
 
@@ -22,6 +22,9 @@ const GLYPH_H: u32 = 7;
 const GLYPH_SCALE: u32 = 2;
 const GLYPH_GAP: u32 = 2;
 const LABEL_PAD: u32 = 3;
+const LANE_MARKING: Color = Color::RGB(235, 210, 70);
+const LANE_DASH_LEN: i32 = 12;
+const LANE_DASH_GAP: i32 = 10;
 
 /// Loaded road tile textures (lives for the `TextureCreator` lifetime).
 pub struct RoadAssets<'tex> {
@@ -140,16 +143,14 @@ pub fn draw_intersection(
         .copy(&assets.approach_ns, None, north_dst)
         .map_err(|e| format!("draw north approach: {e}"))?;
 
-    // South/West arms reuse the same BMP as North/East but inbound lanes sit on the
-    // opposite half (RHT mirror), so flip tiles to align markings with lane paths.
     let south_dst = Rect::new(cx - half, cy + half, rw, ns_al as u32);
     canvas
-        .copy_ex(&assets.approach_ns, None, south_dst, 0.0, None, true, false)
+        .copy(&assets.approach_ns, None, south_dst)
         .map_err(|e| format!("draw south approach: {e}"))?;
 
     let west_dst = Rect::new(cx - half - ew_al, cy - half, ew_al as u32, rw);
     canvas
-        .copy_ex(&assets.approach_ew, None, west_dst, 0.0, None, false, true)
+        .copy(&assets.approach_ew, None, west_dst)
         .map_err(|e| format!("draw west approach: {e}"))?;
 
     let east_dst = Rect::new(cx + half, cy - half, ew_al as u32, rw);
@@ -157,6 +158,129 @@ pub fn draw_intersection(
         .copy(&assets.approach_ew, None, east_dst)
         .map_err(|e| format!("draw east approach: {e}"))?;
 
+    draw_approach_lane_markings(canvas, cx, cy, half, ns_al, ew_al)?;
+
+    Ok(())
+}
+
+fn lane_width_i() -> i32 {
+    LANE_WIDTH as i32
+}
+
+fn draw_approach_lane_markings(
+    canvas: &mut Canvas<Window>,
+    cx: i32,
+    cy: i32,
+    half: i32,
+    ns_al: i32,
+    ew_al: i32,
+) -> Result<(), String> {
+    let lw = lane_width_i();
+    let road_left = cx - half;
+    let road_top = cy - half;
+
+    let dash_x = [lw, lw * 2, half + lw, half + lw * 2];
+    let center_x = [half - 1, half];
+
+    for &dx in &dash_x {
+        draw_dashed_vertical(canvas, road_left + dx, cy - half - ns_al, cy - half)?;
+        draw_dashed_vertical(canvas, road_left + dx, cy + half, cy + half + ns_al)?;
+    }
+    for &dx in &center_x {
+        draw_solid_vertical(canvas, road_left + dx, cy - half - ns_al, cy - half)?;
+        draw_solid_vertical(canvas, road_left + dx, cy + half, cy + half + ns_al)?;
+    }
+
+    let dash_y = [lw, lw * 2, half + lw, half + lw * 2];
+    let center_y = [half - 1, half];
+
+    for &dy in &dash_y {
+        draw_dashed_horizontal(canvas, road_top + dy, cx + half, cx + half + ew_al)?;
+        draw_dashed_horizontal(canvas, road_top + dy, cx - half - ew_al, cx - half)?;
+    }
+    for &dy in &center_y {
+        draw_solid_horizontal(canvas, road_top + dy, cx + half, cx + half + ew_al)?;
+        draw_solid_horizontal(canvas, road_top + dy, cx - half - ew_al, cx - half)?;
+    }
+
+    Ok(())
+}
+
+fn draw_dashed_vertical(
+    canvas: &mut Canvas<Window>,
+    x: i32,
+    y0: i32,
+    y1: i32,
+) -> Result<(), String> {
+    canvas.set_draw_color(LANE_MARKING);
+    let (start, end) = if y0 <= y1 { (y0, y1) } else { (y1, y0) };
+    let mut y = start;
+    let mut on = true;
+    while y < end {
+        if on {
+            let dash_end = (y + LANE_DASH_LEN).min(end);
+            canvas
+                .fill_rect(Rect::new(x, y, 1, (dash_end - y) as u32))
+                .map_err(|e| format!("draw dashed vertical: {e}"))?;
+            y = dash_end;
+        } else {
+            y = (y + LANE_DASH_GAP).min(end);
+        }
+        on = !on;
+    }
+    Ok(())
+}
+
+fn draw_dashed_horizontal(
+    canvas: &mut Canvas<Window>,
+    y: i32,
+    x0: i32,
+    x1: i32,
+) -> Result<(), String> {
+    canvas.set_draw_color(LANE_MARKING);
+    let (start, end) = if x0 <= x1 { (x0, x1) } else { (x1, x0) };
+    let mut x = start;
+    let mut on = true;
+    while x < end {
+        if on {
+            let dash_end = (x + LANE_DASH_LEN).min(end);
+            canvas
+                .fill_rect(Rect::new(x, y, (dash_end - x) as u32, 1))
+                .map_err(|e| format!("draw dashed horizontal: {e}"))?;
+            x = dash_end;
+        } else {
+            x = (x + LANE_DASH_GAP).min(end);
+        }
+        on = !on;
+    }
+    Ok(())
+}
+
+fn draw_solid_vertical(
+    canvas: &mut Canvas<Window>,
+    x: i32,
+    y0: i32,
+    y1: i32,
+) -> Result<(), String> {
+    canvas.set_draw_color(LANE_MARKING);
+    let (start, end) = if y0 <= y1 { (y0, y1) } else { (y1, y0) };
+    canvas
+        .fill_rect(Rect::new(x, start, 1, (end - start) as u32))
+        .map_err(|e| format!("draw solid vertical: {e}"))?;
+    Ok(())
+}
+
+fn draw_solid_horizontal(
+    canvas: &mut Canvas<Window>,
+    y: i32,
+    x0: i32,
+    x1: i32,
+) -> Result<(), String> {
+    canvas.set_draw_color(LANE_MARKING);
+    let (start, end) = if x0 <= x1 { (x0, x1) } else { (x1, x0) };
+    canvas
+        .fill_rect(Rect::new(start, y, (end - start) as u32, 1))
+        .map_err(|e| format!("draw solid horizontal: {e}"))?;
     Ok(())
 }
 

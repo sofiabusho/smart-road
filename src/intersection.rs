@@ -142,6 +142,35 @@ impl IntersectionModel {
             .map(|lane| lane.id)
             .collect()
     }
+
+    /// True when `point` lies inside the smart-system junction zone.
+    pub fn point_in_zone(&self, point: Vec2) -> bool {
+        point_in_polygon(point, &self.zone_polygon)
+    }
+}
+
+/// Ray-casting point-in-polygon test.
+fn point_in_polygon(point: Vec2, polygon: &[Vec2]) -> bool {
+    if polygon.len() < 3 {
+        return false;
+    }
+
+    let mut inside = false;
+    let mut j = polygon.len() - 1;
+
+    for i in 0..polygon.len() {
+        let pi = polygon[i];
+        let pj = polygon[j];
+
+        if ((pi.y > point.y) != (pj.y > point.y))
+            && (point.x < (pj.x - pi.x) * (point.y - pi.y) / (pj.y - pi.y) + pi.x)
+        {
+            inside = !inside;
+        }
+        j = i;
+    }
+
+    inside
 }
 
 impl Default for IntersectionModel {

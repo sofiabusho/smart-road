@@ -12,12 +12,6 @@ pub const WINDOW_HEIGHT: u32 = 768;
 /// Post-session statistics window title (C06 / REQ-19).
 pub const STATS_WINDOW_TITLE: &str = "smart-road — session statistics";
 
-/// Statistics window width in pixels.
-pub const STATS_WINDOW_WIDTH: u32 = 520;
-
-/// Statistics window height in pixels.
-pub const STATS_WINDOW_HEIGHT: u32 = 440;
-
 /// Target frames per second for the game loop.
 pub const TARGET_FPS: u32 = 60;
 
@@ -81,6 +75,9 @@ pub const BASE_ACCELERATION: f32 = 180.0;
 
 /// Maximum deceleration toward commanded speed (world units/s²). B05 scales per vehicle.
 pub const BASE_DECELERATION: f32 = 240.0;
+
+/// Distance before the junction stop line where reservation gating begins (world units).
+pub const RESERVATION_TRIGGER_DISTANCE: f32 = 200.0;
 
 #[cfg(test)]
 mod tests {

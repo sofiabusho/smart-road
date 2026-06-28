@@ -53,6 +53,37 @@ pub struct Vehicle {
     pub path_index: usize,
     pub distance_in_crossing: f32,
     pub time_in_crossing: f32,
+    /// True when the smart controller granted intersection entry (reservation gate).
+    pub reservation_granted: bool,
+    /// Latched by the junction scheduler — vehicle must stay at zero until conflicts clear.
+    pub scheduler_yield: bool,
+    /// Latched when reservation is blocked near the junction — no creep or zone-gate oscillation.
+    pub reservation_hold: bool,
+}
+
+/// True when an external controller owns this vehicle's speed (scheduler or reservation gate).
+pub fn is_motion_frozen(vehicle: &Vehicle) -> bool {
+    vehicle.scheduler_yield || vehicle.reservation_hold
+}
+
+/// Maximum speed that still allows a full stop within `distance` at deceleration `decel`.
+pub fn max_speed_to_stop(distance: f32, decel: f32) -> f32 {
+    if distance <= 0.0 {
+        0.0
+    } else {
+        (2.0 * decel * distance).max(0.0).sqrt()
+    }
+}
+
+/// Cap commanded speed so an unreserved vehicle can stop before the junction zone.
+pub fn apply_reservation_braking(vehicle: &mut Vehicle, distance_to_zone: f32) {
+    let (_, decel_scale) = motion_profile(vehicle.id);
+    let decel = crate::config::BASE_DECELERATION * decel_scale;
+    let cap = max_speed_to_stop(distance_to_zone, decel);
+    vehicle.commanded_velocity = vehicle.commanded_velocity.min(cap);
+    if !vehicle.reservation_granted && distance_to_zone <= crate::config::VEHICLE_LENGTH {
+        vehicle.commanded_velocity = 0.0;
+    }
 }
 
 /// Per-vehicle acceleration and deceleration scale (REQ-B3 / AUD-B3).
@@ -66,6 +97,12 @@ pub fn motion_profile(id: VehicleId) -> (f32, f32) {
 
 /// Ramp `velocity` toward `commanded_velocity` with bounded accel/decel (B05).
 pub fn step_velocity_toward_command(vehicle: &mut Vehicle, dt: f32) {
+    if is_motion_frozen(vehicle) {
+        vehicle.velocity = 0.0;
+        vehicle.commanded_velocity = 0.0;
+        return;
+    }
+
     let target = vehicle.commanded_velocity;
     let current = vehicle.velocity;
     if (target - current).abs() < 0.01 {
@@ -105,6 +142,9 @@ pub fn spawn_vehicle(id: VehicleId, lane: &LaneInfo, _velocity: f32) -> Vehicle 
         path_index: 0,
         distance_in_crossing: 0.0,
         time_in_crossing: 0.0,
+        reservation_granted: false,
+        scheduler_yield: false,
+        reservation_hold: false,
     }
 }
 
@@ -173,7 +213,7 @@ pub fn enforce_follow_distance(vehicles: &mut [Vehicle], safe_distance: f32) {
     let len = vehicles.len();
 
     for i in 0..len {
-        if !uses_follow_distance(&vehicles[i]) {
+        if !uses_follow_distance(&vehicles[i]) || is_motion_frozen(&vehicles[i]) {
             continue;
         }
 
@@ -241,14 +281,303 @@ pub fn detect_close_call(a: &Vehicle, b: &Vehicle, safe_distance: f32) -> bool {
     dist_sq > 0.0 && dist_sq < safe_distance * safe_distance
 }
 
-/// Zero commanded speed and nudge apart when centers are within one vehicle length.
+/// Minimum clearance between oriented vehicle boxes (world units).
+pub const PROXIMITY_BOX_CLEARANCE: f32 = 2.0;
+
+/// Scheduler reacts when sprite gap falls below this threshold (world units).
+pub const SCHEDULER_SPRITE_GAP_THRESHOLD: f32 = PROXIMITY_BOX_CLEARANCE + 4.0;
+
+/// Hysteresis: yield clears only after gaps widen past this (prevents boundary jitter).
+pub const SCHEDULER_CLEAR_GAP: f32 = SCHEDULER_SPRITE_GAP_THRESHOLD + 8.0;
+
+/// Projected half-extent of the vehicle sprite onto a unit axis.
+fn projected_half_extent(heading_rad: f32, axis_x: f32, axis_y: f32) -> f32 {
+    let half_length = crate::config::VEHICLE_LENGTH * 0.5;
+    let half_width = crate::config::VEHICLE_WIDTH * 0.5;
+    let cos = heading_rad.cos().abs();
+    let sin = heading_rad.sin().abs();
+    half_length * (cos * axis_x.abs() + sin * axis_y.abs())
+        + half_width * (sin * axis_x.abs() + cos * axis_y.abs())
+}
+
+/// Gap between oriented vehicle boxes along the center-to-center axis (negative = overlap).
+pub fn sprite_separation_gap(a: &Vehicle, b: &Vehicle) -> f32 {
+    let dx = b.position.x - a.position.x;
+    let dy = b.position.y - a.position.y;
+    let center_dist = (dx * dx + dy * dy).sqrt();
+    if center_dist <= f32::EPSILON {
+        return -1.0;
+    }
+    let axis_x = dx / center_dist;
+    let axis_y = dy / center_dist;
+    center_dist
+        - projected_half_extent(a.heading_rad, axis_x, axis_y)
+        - projected_half_extent(b.heading_rad, -axis_x, -axis_y)
+}
+
+fn project_point_on_segment(point: Vec2, from: Vec2, to: Vec2) -> (Vec2, f32) {
+    let seg_dx = to.x - from.x;
+    let seg_dy = to.y - from.y;
+    let len_sq = seg_dx * seg_dx + seg_dy * seg_dy;
+    if len_sq <= f32::EPSILON {
+        return (from, 0.0);
+    }
+    let t = ((point.x - from.x) * seg_dx + (point.y - from.y) * seg_dy) / len_sq;
+    let t_clamped = t.clamp(0.0, 1.0);
+    (
+        Vec2::new(
+            from.x + t_clamped * seg_dx,
+            from.y + t_clamped * seg_dy,
+        ),
+        t_clamped,
+    )
+}
+
+/// Re-project `position` onto the lane polyline and sync `path_index` / `heading_rad`.
 ///
-/// Runs in a loop until no pair remains within `min_gap`; this handles cascade scenarios
-/// where pushing pair (A, B) moves A into proximity with C, which would otherwise go
-/// unresolved in a single-pass sweep.
-pub fn clamp_velocity_for_proximity(vehicles: &mut [Vehicle]) {
-    let min_gap = crate::config::VEHICLE_LENGTH * 0.95;
+/// Searches near the current `path_index` first so backward corrections are not
+/// snapped forward onto an earlier segment.
+pub fn snap_to_lane_path(vehicle: &mut Vehicle, model: &IntersectionModel) {
+    let path = match model.lane(vehicle.lane_id) {
+        Some(lane) if lane.path.len() >= 2 => &lane.path,
+        _ => return,
+    };
+
+    let max_seg = path.len() - 2;
+    let anchor = vehicle.path_index.min(max_seg);
+    let window_start = anchor.saturating_sub(2);
+    let window_end = (anchor + 3).min(max_seg);
+
+    let mut best_dist_sq = f32::MAX;
+    let mut best_index = anchor;
+    let mut best_point = vehicle.position;
+
+    for seg_idx in window_start..=window_end {
+        let (proj, _) = project_point_on_segment(vehicle.position, path[seg_idx], path[seg_idx + 1]);
+        let dx = vehicle.position.x - proj.x;
+        let dy = vehicle.position.y - proj.y;
+        let dist_sq = dx * dx + dy * dy;
+        if dist_sq < best_dist_sq {
+            best_dist_sq = dist_sq;
+            best_index = seg_idx;
+            best_point = proj;
+        }
+    }
+
+    if best_dist_sq > 8.0 * 8.0 {
+        for seg_idx in 0..path.len() - 1 {
+            if (window_start..=window_end).contains(&seg_idx) {
+                continue;
+            }
+            let (proj, _) =
+                project_point_on_segment(vehicle.position, path[seg_idx], path[seg_idx + 1]);
+            let dx = vehicle.position.x - proj.x;
+            let dy = vehicle.position.y - proj.y;
+            let dist_sq = dx * dx + dy * dy;
+            if dist_sq < best_dist_sq {
+                best_dist_sq = dist_sq;
+                best_index = seg_idx;
+                best_point = proj;
+            }
+        }
+    }
+
+    vehicle.path_index = best_index;
+    vehicle.position = best_point;
+
+    let from = path[vehicle.path_index];
+    let to = path[vehicle.path_index + 1];
+    let seg_dx = to.x - from.x;
+    let seg_dy = to.y - from.y;
+    if seg_dx * seg_dx + seg_dy * seg_dy > f32::EPSILON {
+        vehicle.heading_rad = seg_dy.atan2(seg_dx);
+    }
+}
+
+/// Correct lateral drift on the current path segment without jumping to another segment.
+pub fn align_to_path_segment(vehicle: &mut Vehicle, model: &IntersectionModel) {
+    let path = match model.lane(vehicle.lane_id) {
+        Some(lane) if lane.path.len() >= 2 => &lane.path,
+        _ => return,
+    };
+
+    let idx = vehicle.path_index.min(path.len() - 2);
+    vehicle.path_index = idx;
+    let from = path[idx];
+    let to = path[idx + 1];
+    let seg_dx = to.x - from.x;
+    let seg_dy = to.y - from.y;
+    let seg_len = (seg_dx * seg_dx + seg_dy * seg_dy).sqrt();
+    if seg_len <= f32::EPSILON {
+        return;
+    }
+
+    let ux = seg_dx / seg_len;
+    let uy = seg_dy / seg_len;
+    let rel_x = vehicle.position.x - from.x;
+    let rel_y = vehicle.position.y - from.y;
+    let along = (rel_x * ux + rel_y * uy).clamp(0.0, seg_len);
+    vehicle.position.x = from.x + ux * along;
+    vehicle.position.y = from.y + uy * along;
+    vehicle.heading_rad = seg_dy.atan2(seg_dx);
+
+    if along >= seg_len - 0.5 && idx < path.len() - 2 {
+        vehicle.path_index = idx + 1;
+    }
+}
+
+/// Step backward along the lane polyline by `distance` world units.
+fn step_backward_on_path(vehicle: &mut Vehicle, model: &IntersectionModel, distance: f32) -> bool {
+    let path = match model.lane(vehicle.lane_id) {
+        Some(lane) if lane.path.len() >= 2 => &lane.path,
+        _ => return false,
+    };
+
+    snap_to_lane_path(vehicle, model);
+    let mut remaining = distance;
+
+    while remaining > 0.0 && vehicle.path_index < path.len() {
+        let seg_idx = vehicle.path_index;
+        let from = path[seg_idx];
+        let to = path[seg_idx + 1];
+        let seg_dx = to.x - from.x;
+        let seg_dy = to.y - from.y;
+        let seg_len = (seg_dx * seg_dx + seg_dy * seg_dy).sqrt();
+        if seg_len <= f32::EPSILON {
+            if seg_idx == 0 {
+                return false;
+            }
+            vehicle.path_index -= 1;
+            continue;
+        }
+
+        let rel_x = vehicle.position.x - from.x;
+        let rel_y = vehicle.position.y - from.y;
+        let along = rel_x * (seg_dx / seg_len) + rel_y * (seg_dy / seg_len);
+
+        if along >= remaining {
+            vehicle.position.x -= (seg_dx / seg_len) * remaining;
+            vehicle.position.y -= (seg_dy / seg_len) * remaining;
+            vehicle.heading_rad = seg_dy.atan2(seg_dx);
+            return true;
+        }
+
+        remaining -= along;
+        if seg_idx == 0 {
+            vehicle.position = from;
+            vehicle.heading_rad = seg_dy.atan2(seg_dx);
+            return false;
+        }
+
+        vehicle.path_index -= 1;
+        vehicle.position = path[vehicle.path_index + 1];
+    }
+
+    snap_to_lane_path(vehicle, model);
+    true
+}
+
+/// Move an unreserved vehicle backward along its lane until it is outside the junction zone.
+pub fn retract_vehicle_outside_zone(vehicle: &mut Vehicle, model: &IntersectionModel) {
+    const STEP: f32 = 6.0;
+    snap_to_lane_path(vehicle, model);
+
+    for _ in 0..120 {
+        if !model.point_in_zone(vehicle.position) {
+            snap_to_lane_path(vehicle, model);
+            return;
+        }
+        if !step_backward_on_path(vehicle, model, STEP) {
+            vehicle.position.x -= vehicle.heading_rad.cos() * STEP;
+            vehicle.position.y -= vehicle.heading_rad.sin() * STEP;
+            snap_to_lane_path(vehicle, model);
+        }
+    }
+}
+
+/// True when `a` is ahead of `b` on the same lane (along `b`'s heading).
+fn same_lane_a_is_ahead_of_b(a: &Vehicle, b: &Vehicle) -> Option<bool> {
+    if a.lane_id != b.lane_id {
+        return None;
+    }
+    let dx = a.position.x - b.position.x;
+    let dy = a.position.y - b.position.y;
+    let along = dx * b.heading_rad.cos() + dy * b.heading_rad.sin();
+    if along.abs() < 0.5 {
+        None
+    } else {
+        Some(along > 0.0)
+    }
+}
+
+/// Pick which vehicle should yield in a proximity conflict (`true` => index `a` yields).
+fn proximity_yielder_is_a(a: &Vehicle, b: &Vehicle) -> bool {
+    if let Some(a_ahead) = same_lane_a_is_ahead_of_b(a, b) {
+        return !a_ahead;
+    }
+    if let Some(b_ahead) = same_lane_a_is_ahead_of_b(b, a) {
+        return b_ahead;
+    }
+
+    let a_managed = a.state == VehicleState::Managed;
+    let b_managed = b.state == VehicleState::Managed;
+    if a_managed && b_managed {
+        if a.commanded_velocity + 0.01 < a.nominal_velocity
+            && b.commanded_velocity + 0.01 >= b.nominal_velocity
+        {
+            return true;
+        }
+        if b.commanded_velocity + 0.01 < b.nominal_velocity
+            && a.commanded_velocity + 0.01 >= a.nominal_velocity
+        {
+            return false;
+        }
+    }
+
+    a.id.0 > b.id.0
+}
+
+/// Slow the yielder and separate sprites when oriented boxes overlap.
+///
+/// The yielder is held at zero speed while too close; position nudges happen only
+/// during actual sprite overlap (`sep < 0`) so waiting vehicles stay visually still.
+pub fn clamp_velocity_for_proximity(vehicles: &mut [Vehicle], _model: &IntersectionModel) {
+    let min_gap = PROXIMITY_BOX_CLEARANCE;
     let len = vehicles.len();
+
+    for i in 0..len {
+        if vehicles[i].state == VehicleState::Done {
+            continue;
+        }
+        for j in (i + 1)..len {
+            if vehicles[j].state == VehicleState::Done {
+                continue;
+            }
+
+            let sep = sprite_separation_gap(&vehicles[i], &vehicles[j]);
+            if sep >= min_gap {
+                continue;
+            }
+
+            let a_yields = proximity_yielder_is_a(&vehicles[i], &vehicles[j]);
+            let yielder = if a_yields { i } else { j };
+            let leader = if a_yields { j } else { i };
+
+            if is_motion_frozen(&vehicles[yielder]) {
+                continue;
+            }
+
+            vehicles[yielder].commanded_velocity = 0.0;
+            vehicles[yielder].velocity = 0.0;
+
+            if sep < 0.0 && vehicles[leader].state == VehicleState::Managed {
+                let cap = VelocityLevel::Yield.speed();
+                vehicles[leader].commanded_velocity =
+                    vehicles[leader].commanded_velocity.min(cap);
+                vehicles[leader].velocity = vehicles[leader].velocity.min(cap);
+            }
+        }
+    }
 
     loop {
         let mut any_pushed = false;
@@ -261,30 +590,35 @@ pub fn clamp_velocity_for_proximity(vehicles: &mut [Vehicle]) {
                 if vehicles[j].state == VehicleState::Done {
                     continue;
                 }
+
+                let sep = sprite_separation_gap(&vehicles[i], &vehicles[j]);
+                if sep >= 0.0 {
+                    continue;
+                }
+
+                any_pushed = true;
+                let a_yields = proximity_yielder_is_a(&vehicles[i], &vehicles[j]);
+                let yielder = if a_yields { i } else { j };
+                if vehicles[yielder].scheduler_yield {
+                    continue;
+                }
+                let push = (min_gap - sep) * 0.5 + 0.5;
                 let dx = vehicles[i].position.x - vehicles[j].position.x;
                 let dy = vehicles[i].position.y - vehicles[j].position.y;
-                let gap = (dx * dx + dy * dy).sqrt();
-                if gap < min_gap {
-                    any_pushed = true;
-                    vehicles[i].commanded_velocity = 0.0;
-                    vehicles[i].velocity = 0.0;
-                    vehicles[j].commanded_velocity = 0.0;
-                    vehicles[j].velocity = 0.0;
-
-                    if gap > f32::EPSILON {
-                        let push = (min_gap - gap) * 0.5 + 0.5;
-                        let nx = dx / gap;
-                        let ny = dy / gap;
-                        vehicles[i].position.x += nx * push;
-                        vehicles[i].position.y += ny * push;
-                        vehicles[j].position.x -= nx * push;
-                        vehicles[j].position.y -= ny * push;
-                    } else {
-                        let nx = vehicles[i].heading_rad.cos();
-                        let ny = vehicles[i].heading_rad.sin();
-                        vehicles[j].position.x -= min_gap * nx;
-                        vehicles[j].position.y -= min_gap * ny;
-                    }
+                let center_dist = (dx * dx + dy * dy).sqrt();
+                if center_dist > f32::EPSILON {
+                    let nx = dx / center_dist;
+                    let ny = dy / center_dist;
+                    vehicles[i].position.x += nx * push;
+                    vehicles[i].position.y += ny * push;
+                    vehicles[j].position.x -= nx * push;
+                    vehicles[j].position.y -= ny * push;
+                } else {
+                    let heading = vehicles[yielder].heading_rad;
+                    vehicles[j].position.x -=
+                        (min_gap + crate::config::VEHICLE_LENGTH) * heading.cos();
+                    vehicles[j].position.y -=
+                        (min_gap + crate::config::VEHICLE_LENGTH) * heading.sin();
                 }
             }
         }
@@ -301,6 +635,12 @@ pub fn clamp_velocity_for_proximity(vehicles: &mut [Vehicle]) {
 /// accumulate here so callers do not also run `integrate_physics` in the same tick.
 pub fn advance_along_path(vehicle: &mut Vehicle, model: &IntersectionModel, dt: f32) {
     if vehicle.state == VehicleState::Done {
+        return;
+    }
+
+    if is_motion_frozen(vehicle) {
+        vehicle.velocity = 0.0;
+        vehicle.commanded_velocity = 0.0;
         return;
     }
 
@@ -346,9 +686,18 @@ pub fn advance_along_path(vehicle: &mut Vehicle, model: &IntersectionModel, dt: 
 
         vehicle.heading_rad = seg_dy.atan2(seg_dx);
 
-        let to_end_dx = to.x - vehicle.position.x;
-        let to_end_dy = to.y - vehicle.position.y;
-        let dist_to_end = (to_end_dx * to_end_dx + to_end_dy * to_end_dy).sqrt();
+        let seg_unit_x = seg_dx / seg_len;
+        let seg_unit_y = seg_dy / seg_len;
+        let rel_x = vehicle.position.x - from.x;
+        let rel_y = vehicle.position.y - from.y;
+        let along = rel_x * seg_unit_x + rel_y * seg_unit_y;
+
+        if along < 0.0 {
+            vehicle.position = from;
+        }
+
+        let along_clamped = along.clamp(0.0, seg_len);
+        let dist_to_end = seg_len - along_clamped;
 
         if remaining <= dist_to_end {
             vehicle.position.x += (seg_dx / seg_len) * remaining;
@@ -393,6 +742,9 @@ mod tests {
             path_index: 0,
             distance_in_crossing: 0.0,
             time_in_crossing: 0.0,
+            reservation_granted: false,
+            scheduler_yield: false,
+            reservation_hold: false,
         }
     }
 
@@ -482,6 +834,9 @@ mod tests {
             path_index: 0,
             distance_in_crossing: 0.0,
             time_in_crossing: 0.0,
+            reservation_granted: false,
+            scheduler_yield: false,
+            reservation_hold: false,
         };
 
         integrate_physics(&mut vehicle, 0.1);
@@ -516,6 +871,9 @@ mod tests {
             path_index: 0,
             distance_in_crossing: 0.0,
             time_in_crossing: 0.0,
+            reservation_granted: false,
+            scheduler_yield: false,
+            reservation_hold: false,
         };
 
         integrate_physics(&mut vehicle, 0.1);
@@ -546,6 +904,9 @@ mod tests {
             path_index: 0,
             distance_in_crossing: 0.0,
             time_in_crossing: 0.0,
+            reservation_granted: false,
+            scheduler_yield: false,
+            reservation_hold: false,
         };
 
         integrate_physics(&mut vehicle, 0.1);
@@ -582,6 +943,9 @@ mod tests {
             path_index: 0,
             distance_in_crossing: 0.0,
             time_in_crossing: 0.0,
+            reservation_granted: false,
+            scheduler_yield: false,
+            reservation_hold: false,
         };
 
         advance_along_path(&mut vehicle, &model, 1.0);
@@ -603,6 +967,47 @@ mod tests {
         vehicle.position.y = y;
         vehicle.position.x = lane.spawn_point.x;
         vehicle
+    }
+
+    #[test]
+    fn sprite_separation_gap_detects_oriented_overlap() {
+        let mut a = make_vehicle(1, 120.0);
+        let mut b = make_vehicle(2, 120.0);
+        a.heading_rad = 0.0;
+        b.heading_rad = 0.0;
+        a.position = Vec2::new(0.0, 0.0);
+        b.position = Vec2::new(crate::config::VEHICLE_LENGTH * 0.5, 0.0);
+        assert!(sprite_separation_gap(&a, &b) < 0.0);
+
+        b.position = Vec2::new(crate::config::VEHICLE_LENGTH + 4.0, 0.0);
+        assert!(sprite_separation_gap(&a, &b) >= 0.0);
+    }
+
+    #[test]
+    fn clamp_yielder_only_stops_follower_not_leader() {
+        let model = IntersectionModel::new();
+        let lid = lane_id(Cardinal::South, Route::Straight);
+        let lane = model.lane(lid).unwrap();
+
+        let mut leader = spawn_vehicle(VehicleId(1), lane, VelocityLevel::Fast.speed());
+        leader.position = Vec2::new(lane.spawn_point.x, 500.0);
+        leader.velocity = VelocityLevel::Fast.speed();
+        leader.commanded_velocity = leader.velocity;
+
+        let mut follower = spawn_vehicle(VehicleId(2), lane, VelocityLevel::Fast.speed());
+        follower.position = Vec2::new(
+            lane.spawn_point.x,
+            leader.position.y + crate::config::VEHICLE_LENGTH * 0.5,
+        );
+        follower.velocity = VelocityLevel::Fast.speed();
+        follower.commanded_velocity = follower.velocity;
+
+        let mut vehicles = vec![leader, follower];
+        clamp_velocity_for_proximity(&mut vehicles, &model);
+
+        assert_eq!(vehicles[0].velocity, VelocityLevel::Fast.speed());
+        assert_eq!(vehicles[1].velocity, 0.0);
+        assert!(sprite_separation_gap(&vehicles[0], &vehicles[1]) >= 0.0);
     }
 
     #[test]
@@ -899,6 +1304,9 @@ mod tests {
             path_index: 1,
             distance_in_crossing: 0.0,
             time_in_crossing: 0.0,
+            reservation_granted: false,
+            scheduler_yield: false,
+            reservation_hold: false,
         };
 
         advance_along_path(&mut vehicle, &model, 0.25);

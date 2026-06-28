@@ -15,7 +15,7 @@ pub struct Stats {
     pub max_crossing_time: f32,
     pub min_crossing_time: f32,
     pub close_calls: u32,
-    /// C08 bonus (REQ-B2): total session wall time in seconds.
+    /// C08 bonus (REQ-B2): total session wall time in seconds (set in `finalize_session`).
     pub session_duration_secs: f32,
     /// C08 bonus: mean crossing time across vehicles that completed.
     pub avg_crossing_time_secs: f32,
@@ -293,6 +293,9 @@ mod tests {
             path_index: 0,
             distance_in_crossing: 0.0,
             time_in_crossing: 1.5,
+            reservation_granted: true,
+            scheduler_yield: false,
+            reservation_hold: false,
         };
 
         session.observe_vehicles(std::slice::from_ref(&vehicle), 0.0);
@@ -357,6 +360,9 @@ mod tests {
                 path_index: 0,
                 distance_in_crossing: 0.0,
                 time_in_crossing: 0.0,
+                reservation_granted: true,
+                scheduler_yield: false,
+                reservation_hold: false,
             },
             Vehicle {
                 id: VehicleId(2),
@@ -372,6 +378,9 @@ mod tests {
                 path_index: 0,
                 distance_in_crossing: 0.0,
                 time_in_crossing: 0.0,
+                reservation_granted: true,
+                scheduler_yield: false,
+                reservation_hold: false,
             },
         ];
 

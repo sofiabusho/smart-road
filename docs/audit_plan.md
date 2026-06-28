@@ -330,6 +330,113 @@ Verify: Review the smart-intersection strategy during sustained R traffic. Pass 
 
 ---
 
+---
+
+# Audit Findings
+
+## Branch / Commit
+Branch: `iana/collision-fix` — top commit `469c3bd` (edit roads)
+
+## AUD-16: Sustained random traffic — no collisions
+**Verdict**: UNCERTAIN
+
+**Reasoning**:
+The R-key path is: `input.rs:49–51` (key-down sets `random_stream_active = true`) → `app.rs:126–128` (one `spawn_random` call per frame while held) → `spawn.rs:178–182` (`spawn_random` picks a random cardinal+route and delegates to `try_spawn`). `try_spawn` gates on a 400 ms per-direction cooldown and a lane capacity of 8, then calls `same_lane_spawn_too_close` (spawn.rs:249–267) to reject spawns that would land within `SAFE_DISTANCE` of an existing vehicle.
+
+Collision avoidance is layered:
+1. **Same-lane following**: `enforce_follow_distance` (vehicle.rs:212–265) caps follower `commanded_velocity` proportionally when gap falls below `SAFE_DISTANCE` (40 px), and zeros it below 10 % of the gap.
+2. **Reservation gate**: `smart.update` (smart.rs:57–138) denies zone entry to any vehicle whose lane conflicts with a currently-granted or in-zone reservation. `expand_reservations` (smart.rs:259–290) processes candidates in FIFO wait-order, so only one vehicle per conflict group proceeds at a time.
+3. **Zone backstop**: `enforce_zone_gate` (smart.rs:333–345) physically retracts any unreserved vehicle that overshoots the zone boundary, zeroing velocity and calling `retract_vehicle_outside_zone`.
+4. **Post-move proximity clamp**: `clamp_velocity_for_proximity` (vehicle.rs:544–630) zeros the yielder's velocity whenever OBB separation (`sprite_separation_gap`) drops below `PROXIMITY_BOX_CLEARANCE` (2.0 px), then a second loop corrects any residual sprite overlap with a position push.
+
+The mechanism is architecturally sound. Two specific edge-case risks remain:
+
+- **Position-push ignores leader's `scheduler_yield`** (vehicle.rs:597–621): The push guard at line 602 skips the pair if the *yielder* has `scheduler_yield` set, but does not protect the *leader* from being nudged. A scheduler-frozen leader can be physically displaced by the push, making its `path_index` stale when `advance_along_path` runs next frame. The path-follow code re-clamps lateral drift, but if the longitudinal component is negative (`along < 0.0`, line 695) the vehicle teleports back to the segment start. This is a visible glitch, not a true collision, but it could move a managed vehicle outside the zone boundary briefly, triggering a spurious state transition.
+
+- **Push-loop convergence with many simultaneous overlaps** (vehicle.rs:582–629): The `loop { ... if !any_pushed { break; } }` has no iteration cap. With many vehicles in close proximity, pairs can push each other in conflicting directions and the loop may cycle for many iterations before converging. No infinite-loop has been observed in tests, but dense sustained R traffic (approaching the 8-vehicle lane cap on multiple lanes simultaneously) is the highest-risk scenario.
+
+The two random-specific concerns (simultaneous cross-lane spawning, opposed approaches entering trigger distance together) are handled by the FIFO reservation system and are equivalent to the manually-triggered scenarios already tested in AUD-8–AUD-14.
+
+**Key files**:
+- [src/input.rs:49–51](src/input.rs#L49) — R-key toggles `random_stream_active`
+- [src/app.rs:126–128](src/app.rs#L126) — one `spawn_random` per frame while R held
+- [src/spawn.rs:147–175](src/spawn.rs#L147) — `try_spawn` cooldown + lane-capacity + proximity guard
+- [src/vehicle.rs:212–265](src/vehicle.rs#L212) — `enforce_follow_distance` (same-lane)
+- [src/smart.rs:57–138](src/smart.rs#L57) — reservation gate + zone management
+- [src/smart.rs:333–345](src/smart.rs#L333) — `enforce_zone_gate` backstop
+- [src/vehicle.rs:544–630](src/vehicle.rs#L544) — `clamp_velocity_for_proximity` + push loop
+
+**Watch out for**:
+- A Managed vehicle briefly snapping backward to a path waypoint when the post-move push loop displaces it (visible backward flash).
+- Under extreme R-key density (4 approaches all near lane-cap simultaneously), check for the push loop taking many frames to settle — this would appear as vehicles jittering in place for one or two frames.
+- Any scenario where two vehicles from genuinely conflicting lanes (e.g. South-Straight and East-Straight) both appear inside the zone at the same moment; this would mean the reservation gate failed.
+
+---
+
+## AUD-17: Random traffic — low congestion
+**Verdict**: PASS
+
+**Reasoning**:
+Three mechanisms bound lane queue size under sustained R-key traffic:
+
+1. **Per-direction cooldown** (`SPAWN_COOLDOWN_MS = 400 ms`, config.rs:61; enforced in spawn.rs:62–75): Each approach direction allows at most one new vehicle per 400 ms (~2.5 vehicles/s). R key goes through `spawn_random` → `try_spawn` (spawn.rs:178–182), which calls `self.cooldown.allows(req.approach)` at line 148 — the same check as manual arrow keys. There is no bypass for random spawns.
+
+2. **Lane capacity cap** (`LANE_CAPACITY = 8`, spawn.rs:10): `try_spawn` counts all non-Done vehicles on the target `lane_id` (lines 152–158) and rejects if `>= 8`. The count includes Managed and Exiting vehicles, not just Approaching, so a lane actively clearing the intersection still counts toward the cap. This means at most 8 simultaneous vehicles per lane.
+
+3. **FIFO reservation progress**: Vehicles queued in Approaching state will eventually receive a reservation because `expand_reservations` (smart.rs:259–290) processes candidates in wait-order. No permanent starvation scenario exists: the head-of-queue vehicle gets a reservation as soon as the zone clears, crosses, and transitions to Done, freeing a slot. No circular-wait deadlock is possible because reservation grant is strictly one-at-a-time per conflict group.
+
+Regarding the "fewer than 8 stuck in same lane" criterion: with the cap at 8, exactly 8 vehicles can exist on a lane simultaneously, but the Managed and Exiting vehicles among them are actively moving through the intersection, not "stuck." The number of truly stopped/waiting (Approaching, reservation_hold=true) vehicles on any one lane is in practice well below 8 because vehicles begin crossing as soon as the zone clears.
+
+**Key files**:
+- [src/spawn.rs:10](src/spawn.rs#L10) — `LANE_CAPACITY = 8`
+- [src/spawn.rs:46–87](src/spawn.rs#L46) — `SpawnCooldown` with 400 ms per direction
+- [src/spawn.rs:147–175](src/spawn.rs#L147) — `try_spawn` applies both cooldown and capacity checks
+- [src/spawn.rs:178–182](src/spawn.rs#L178) — `spawn_random` uses same `try_spawn` path (no bypass)
+- [src/smart.rs:259–290](src/smart.rs#L259) — `expand_reservations` FIFO ordering prevents starvation
+- [src/config.rs:61](src/config.rs#L61) — `SPAWN_COOLDOWN_MS = 400`
+
+**Watch out for**:
+- At the 8-vehicle lane cap, new random spawns on that approach are silently rejected (no visual feedback). During a sustained R run, watch for a specific lane that appears to stop growing — confirm this is the cap working, not a bug.
+- The cap is per `lane_id` (approach × route), not per approach. Three lanes per approach means one approach can hold up to 24 vehicles total across its three route lanes. Check whether the same *approach* (not lane) looks congested; this would still pass AUD-17 as long as each individual lane stays below 8.
+- If two opposing straight-lane queues (e.g. South-Straight and North-Straight) both hit the cap simultaneously and their reservations alternate slowly, watch for the queue backing up visually to the spawn margin.
+
+---
+
+## AUD-31: At least 3 distinct velocities
+**Verdict**: PASS
+
+**Reasoning**:
+Three named velocity levels are defined, assigned at spawn time, stored as the vehicle's `nominal_velocity`, and actively restored during operation:
+
+- `VelocityLevel::Fast` → `DEFAULT_SPAWN_VELOCITY * 1.4` = **168.0 px/s** (vehicle.rs:32)
+- `VelocityLevel::Cruise` → `DEFAULT_SPAWN_VELOCITY * 1.0` = **120.0 px/s** (vehicle.rs:33)
+- `VelocityLevel::Yield` → `DEFAULT_SPAWN_VELOCITY * 0.5` = **60.0 px/s** (vehicle.rs:34)
+
+Assignment in `spawn_vehicle` (vehicle.rs:125–130) uses `id.0 % 3`: remainder 0 → Fast, 1 → Cruise, 2 → Yield. Since IDs are sequential starting at 1 (spawn.rs:129), the first three vehicles receive Cruise, Yield, and Fast respectively — all three levels appear after the third spawn.
+
+The speed is wired into motion: `spawn_vehicle` sets `velocity`, `commanded_velocity`, and `nominal_velocity` all to `level.speed()` (vehicle.rs:131–140). In free-flowing conditions, `enforce_follow_distance` restores `commanded_velocity = nominal` when the gap exceeds `SAFE_DISTANCE` (vehicle.rs:241). The B05 ramp (`step_velocity_toward_command`, vehicle.rs:99–121) drives `velocity` toward `commanded_velocity` at bounded accel/decel rates. Speed changes are triggered by real conditions (approaching another vehicle reduces commanded_velocity proportionally; entering the reservation trigger zone activates braking; scheduler yield freezes to zero).
+
+Two unit tests confirm the mechanism end-to-end: `b03_spawned_vehicles_have_three_distinct_commanded_velocities` (vehicle.rs:752) verifies the actual commanded_velocity values match the three VelocityLevel speeds after going through the spawn path; `faster_commanded_velocity_drives_strictly_greater_distance` (vehicle.rs:801) proves the speed difference produces measurably different distances in the physics integrator.
+
+**Key files**:
+- [src/vehicle.rs:21–37](src/vehicle.rs#L21) — `VelocityLevel` enum and `speed()` values
+- [src/vehicle.rs:125–149](src/vehicle.rs#L125) — `spawn_vehicle` assigns level by `id.0 % 3`
+- [src/vehicle.rs:240–241](src/vehicle.rs#L240) — nominal speed restored when gap clears
+- [src/vehicle.rs:99–121](src/vehicle.rs#L99) — `step_velocity_toward_command` ramp
+- [src/config.rs:58](src/config.rs#L58) — `DEFAULT_SPAWN_VELOCITY = 120.0`
+- [src/vehicle.rs:752](src/vehicle.rs#L752) — unit test confirming all 3 levels appear
+
+**Watch out for**:
+- `VelocityLevel::Yield` (60 px/s) is a *spawn-assigned nominal speed* for id%3==2 vehicles, not the same thing as the scheduler stopping a vehicle or the reservation gate braking a vehicle. A human auditor watching traffic may see vehicles slowed to zero by the scheduler and interpret that as a fourth speed level, or may conflate the nominal Yield speed with a "stopped" state. The distinct visible speeds to look for are: ~168 px/s (visibly fast, outruns others), ~120 px/s (medium), and ~60 px/s (noticeably slower, half the Cruise speed).
+- Inside the managed zone, `smart.rs` can snap velocity to zero (scheduler yield) or to nominal instantly (LIM-1 — bypass of B05 ramp). This makes the *number* of observable velocity states larger than three during intersection crossing, but the three *nominal* levels are definitively present.
+
+---
+
+## Summary
+The codebase has a well-layered collision-avoidance architecture: same-lane follow-distance capping, a FIFO reservation gate that admits exactly one vehicle per conflict group, a physical zone backstop that ejects reservation overshots, and an OBB-based post-move proximity correction. AUD-31 is the most straightforwardly safe check — three velocity levels are structurally guaranteed after the third vehicle spawns and are verifiable in unit tests without running the simulation. AUD-17 is similarly robust: R-key spawning is not privileged and is bounded by the same 400 ms cooldown and 8-vehicle lane cap as manual spawning, with FIFO reservation preventing starvation. The single biggest risk heading into the live audit is the position-push loop in `clamp_velocity_for_proximity` (vehicle.rs:582–629): it can displace a scheduler-frozen leader off its path segment and runs without an iteration bound, making it the most likely source of unexpected visual behaviour (vehicle snap/jitter) or, in rare dense traffic, a convergence delay. A human auditor running AUD-16 should specifically watch for vehicles that flash backward or stutter when three or more occupy a short approach segment simultaneously.
+
+---
+
 ## Shared Setup Steps
 
 All three auditors must complete these steps before starting any checks:

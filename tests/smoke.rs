@@ -10,10 +10,23 @@ use smart_road::config::{
 use smart_road::input::{approach_for_arrow, InputEvent, InputState};
 use smart_road::intersection::{lane_id, Cardinal, IntersectionModel, Route, Vec2};
 use smart_road::smart::SmartController;
-use smart_road::spawn::{SpawnRequest, SpawnSystem};
+use smart_road::spawn::{SpawnRequest, SpawnSystem, VehicleExit};
 use smart_road::stats::StatsSession;
 use smart_road::stats_window::format_stats_lines;
-use smart_road::vehicle::VehicleState;
+use smart_road::vehicle::{clamp_velocity_for_proximity, sprite_separation_gap, VehicleState};
+
+/// One simulation tick: smart (schedule) → physics → zone gate → proximity clamp.
+fn simulation_tick(
+    spawn: &mut SpawnSystem,
+    smart: &mut SmartController,
+    model: &IntersectionModel,
+) -> Vec<VehicleExit> {
+    smart.update(spawn.vehicles_mut(), model, FIXED_TIMESTEP_SECS);
+    let exited = spawn.update(model, FIXED_TIMESTEP_SECS);
+    SmartController::enforce_zone_gate(spawn.vehicles_mut(), model);
+    clamp_velocity_for_proximity(spawn.vehicles_mut(), model);
+    exited
+}
 #[test]
 fn crate_smoke_config_constants() {
     assert_eq!(WINDOW_TITLE, "smart-road");
@@ -91,8 +104,7 @@ fn crate_smoke_spawn_smart_detection_pipeline() {
         .expect("spawn succeeds");
     assert_eq!(spawn.vehicles()[0].state, VehicleState::Approaching);
     for _ in 0..200 {
-        smart.update(spawn.vehicles_mut(), &model, FIXED_TIMESTEP_SECS);
-        let _ = spawn.update(&model, FIXED_TIMESTEP_SECS);
+        simulation_tick(&mut spawn, &mut smart, &model);
         if spawn.vehicles()[0].state == VehicleState::Managed {
             break;
         }
@@ -192,8 +204,7 @@ fn crate_smoke_stats_collector_pipeline() {
     let mut recorded_exit = false;
     for _ in 0..800 {
         session_time += FIXED_TIMESTEP_SECS;
-        smart.update(spawn.vehicles_mut(), &model, FIXED_TIMESTEP_SECS);
-        let exited = spawn.update(&model, FIXED_TIMESTEP_SECS);
+        let exited = simulation_tick(&mut spawn, &mut smart, &model);
         stats.observe_vehicles(spawn.vehicles(), session_time);
         for exit in exited {
             stats.record_exit(exit.id, exit.time_in_crossing);
@@ -253,8 +264,7 @@ fn crate_smoke_session_stats_populated_before_esc_exit() {
         }
 
         session_time += FIXED_TIMESTEP_SECS;
-        smart.update(spawn.vehicles_mut(), &model, FIXED_TIMESTEP_SECS);
-        let exited = spawn.update(&model, FIXED_TIMESTEP_SECS);
+        let exited = simulation_tick(&mut spawn, &mut smart, &model);
         stats.observe_vehicles(spawn.vehicles(), session_time);
         for exit in exited {
             stats.record_exit(exit.id, exit.time_in_crossing);
@@ -282,8 +292,6 @@ fn crate_smoke_session_stats_populated_before_esc_exit() {
 
 #[test]
 fn crate_smoke_cross_traffic_scheduler_avoids_overlap() {
-    use smart_road::config::VEHICLE_LENGTH;
-
     let model = IntersectionModel::new();
     let mut spawn = SpawnSystem::new();
     let mut smart = SmartController::new();
@@ -295,12 +303,11 @@ fn crate_smoke_cross_traffic_scheduler_avoids_overlap() {
         .try_spawn(SpawnRequest::new(Cardinal::East, Route::Straight), &model)
         .expect("east spawn");
 
-    let collision_threshold = VEHICLE_LENGTH * 0.9;
     let mut saw_scheduler_yield = false;
     let mut saw_scheduler_range = false;
 
     for _ in 0..1200 {
-        smart.update(spawn.vehicles_mut(), &model, FIXED_TIMESTEP_SECS);
+        simulation_tick(&mut spawn, &mut smart, &model);
         let vehicles = spawn.vehicles();
         if SmartController::managed_vehicles_in_scheduler_range(vehicles) {
             saw_scheduler_range = true;
@@ -308,17 +315,14 @@ fn crate_smoke_cross_traffic_scheduler_avoids_overlap() {
         if SmartController::managed_scheduler_yielded(vehicles) {
             saw_scheduler_yield = true;
         }
-        let _ = spawn.update(&model, FIXED_TIMESTEP_SECS);
 
         let vehicles = spawn.vehicles();
         for i in 0..vehicles.len() {
             for j in (i + 1)..vehicles.len() {
-                let dx = vehicles[i].position.x - vehicles[j].position.x;
-                let dy = vehicles[i].position.y - vehicles[j].position.y;
-                let gap = (dx * dx + dy * dy).sqrt();
+                let sep = sprite_separation_gap(&vehicles[i], &vehicles[j]);
                 assert!(
-                    gap >= collision_threshold,
-                    "vehicles overlapped (gap={gap})"
+                    sep >= 0.0,
+                    "vehicle sprites overlapped (sep={sep})"
                 );
             }
         }
@@ -336,7 +340,7 @@ fn crate_smoke_cross_traffic_scheduler_avoids_overlap() {
 
 mod audit_sim {
     use super::*;
-    use smart_road::config::{SPAWN_COOLDOWN_MS, VEHICLE_LENGTH};
+    use smart_road::config::SPAWN_COOLDOWN_MS;
     use std::thread;
     use std::time::Duration;
 
@@ -347,12 +351,11 @@ mod audit_sim {
         max_frames: u32,
     ) {
         let mut smart = SmartController::new();
-        let collision_threshold = VEHICLE_LENGTH * 0.9;
         let mut saw_scheduler_yield = false;
         let mut saw_scheduler_range = false;
 
         for _ in 0..max_frames {
-            smart.update(spawn.vehicles_mut(), model, FIXED_TIMESTEP_SECS);
+            simulation_tick(spawn, &mut smart, model);
             let vehicles = spawn.vehicles();
             if SmartController::managed_vehicles_in_scheduler_range(vehicles) {
                 saw_scheduler_range = true;
@@ -360,17 +363,14 @@ mod audit_sim {
             if SmartController::managed_scheduler_yielded(vehicles) {
                 saw_scheduler_yield = true;
             }
-            let _ = spawn.update(model, FIXED_TIMESTEP_SECS);
 
             let vehicles = spawn.vehicles();
             for i in 0..vehicles.len() {
                 for j in (i + 1)..vehicles.len() {
-                    let dx = vehicles[i].position.x - vehicles[j].position.x;
-                    let dy = vehicles[i].position.y - vehicles[j].position.y;
-                    let gap = (dx * dx + dy * dy).sqrt();
+                    let sep = sprite_separation_gap(&vehicles[i], &vehicles[j]);
                     assert!(
-                        gap >= collision_threshold,
-                        "vehicles overlapped (gap={gap}, ids {:?} vs {:?})",
+                        sep >= 0.0,
+                        "vehicles overlapped (sep={sep}, ids {:?} vs {:?})",
                         vehicles[i].id,
                         vehicles[j].id
                     );
@@ -541,6 +541,9 @@ fn crate_smoke_aud15_scheduler_yields_without_proximity_clamp() {
         path_index: 0,
         distance_in_crossing: 0.0,
         time_in_crossing: 0.0,
+        reservation_granted: false,
+        scheduler_yield: false,
+        reservation_hold: false,
     }];
     smart.update(&mut vehicles, &model, FIXED_TIMESTEP_SECS);
     assert_eq!(
@@ -549,9 +552,9 @@ fn crate_smoke_aud15_scheduler_yields_without_proximity_clamp() {
         "south vehicle must enter Managed zone"
     );
 
-    // Phase 2: add East-Straight vehicle (entry_sequence = 1) within scheduler range.
+    // Phase 2: add East-Straight vehicle already Managed (reservation gate would block Approaching).
     // South-Straight and East-Straight are confirmed conflicting lanes.
-    vehicles.push(Vehicle {
+    let east = Vehicle {
         id: VehicleId(2),
         lane_id: lane_id(Cardinal::East, Route::Straight),
         route: Route::Straight,
@@ -561,16 +564,21 @@ fn crate_smoke_aud15_scheduler_yields_without_proximity_clamp() {
         velocity: nominal,
         commanded_velocity: nominal,
         nominal_velocity: nominal,
-        state: VehicleState::Approaching,
+        state: VehicleState::Managed,
         path_index: 0,
         distance_in_crossing: 0.0,
         time_in_crossing: 0.0,
-    });
+        reservation_granted: true,
+        scheduler_yield: false,
+        reservation_hold: false,
+    };
+    smart.register_managed_entry(east.id, 1);
+    vehicles.push(east);
     smart.update(&mut vehicles, &model, FIXED_TIMESTEP_SECS);
     assert_eq!(
         vehicles[1].state,
         VehicleState::Managed,
-        "east vehicle must enter Managed zone"
+        "east vehicle must remain Managed for in-zone scheduler test"
     );
 
     // Record positions before the scheduler-only update.
@@ -607,7 +615,6 @@ fn crate_smoke_aud15_scheduler_yields_without_proximity_clamp() {
 fn crate_smoke_aud16_aud17_sustained_no_overlap_no_lane_overflow() {
     use std::collections::HashMap;
 
-    use smart_road::config::VEHICLE_LENGTH;
     use smart_road::spawn::LANE_CAPACITY;
 
     let model = IntersectionModel::new();
@@ -621,7 +628,6 @@ fn crate_smoke_aud16_aud17_sustained_no_overlap_no_lane_overflow() {
     spawn.try_spawn(SpawnRequest::new(Cardinal::West, Route::Straight), &model);
 
     let total_frames = (60.0 / FIXED_TIMESTEP_SECS) as u32;
-    let collision_threshold = VEHICLE_LENGTH * 0.9;
 
     // Tracks that at least one frame had vehicles present (proves assertions are non-vacuous).
     let mut saw_vehicles = false;
@@ -633,8 +639,7 @@ fn crate_smoke_aud16_aud17_sustained_no_overlap_no_lane_overflow() {
         spawn.force_cooldowns_expired();
         spawn.spawn_random(&model);
 
-        smart.update(spawn.vehicles_mut(), &model, FIXED_TIMESTEP_SECS);
-        let _ = spawn.update(&model, FIXED_TIMESTEP_SECS);
+        simulation_tick(&mut spawn, &mut smart, &model);
 
         let vehicles = spawn.vehicles();
 
@@ -645,12 +650,10 @@ fn crate_smoke_aud16_aud17_sustained_no_overlap_no_lane_overflow() {
         // AUD-16: no two vehicles may overlap.
         for i in 0..vehicles.len() {
             for j in (i + 1)..vehicles.len() {
-                let dx = vehicles[i].position.x - vehicles[j].position.x;
-                let dy = vehicles[i].position.y - vehicles[j].position.y;
-                let gap = (dx * dx + dy * dy).sqrt();
+                let sep = sprite_separation_gap(&vehicles[i], &vehicles[j]);
                 assert!(
-                    gap >= collision_threshold,
-                    "frame {frame}: vehicles {:?} and {:?} overlapped (gap={gap:.2})",
+                    sep >= 0.0,
+                    "frame {frame}: vehicles {:?} and {:?} overlapped (sep={sep:.2})",
                     vehicles[i].id,
                     vehicles[j].id
                 );
@@ -720,8 +723,7 @@ fn simulate_session_tick(
     session_time: &mut f32,
 ) {
     *session_time += FIXED_TIMESTEP_SECS;
-    smart.update(spawn.vehicles_mut(), model, FIXED_TIMESTEP_SECS);
-    let exited = spawn.update(model, FIXED_TIMESTEP_SECS);
+    let exited = simulation_tick(spawn, smart, model);
     stats.observe_vehicles(spawn.vehicles(), *session_time);
     for exit in exited {
         stats.record_exit(exit.id, exit.time_in_crossing);
@@ -934,4 +936,65 @@ fn crate_smoke_audit19_stats_window_is_separate_surface() {
         "AUD-19: stats window must be a separate surface from the simulation window"
     );
     assert!(STATS_WINDOW_TITLE.contains("statistics"));
+}
+
+/// Cross-traffic waiter must not creep while blocked at the junction (↑ then →).
+#[test]
+fn crate_smoke_cross_traffic_waiter_stays_still() {
+    let model = IntersectionModel::new();
+    let mut spawn = SpawnSystem::new();
+    let mut smart = SmartController::new();
+
+    spawn
+        .try_spawn(SpawnRequest::new(Cardinal::South, Route::Straight), &model)
+        .unwrap();
+    spawn
+        .try_spawn(SpawnRequest::new(Cardinal::West, Route::Straight), &model)
+        .unwrap();
+
+    let mut max_wait_delta = 0.0f32;
+
+    for _ in 0..900 {
+        let before: Vec<_> = spawn
+            .vehicles()
+            .iter()
+            .map(|v| {
+                (
+                    v.id,
+                    v.position,
+                    v.reservation_granted,
+                    v.reservation_hold,
+                    v.scheduler_yield,
+                )
+            })
+            .collect();
+
+        simulation_tick(&mut spawn, &mut smart, &model);
+
+        let after = spawn.vehicles();
+        for (id, pos, _granted, hold, sched_yield) in before {
+            let Some(v) = after.iter().find(|x| x.id == id) else {
+                continue;
+            };
+            let dx = v.position.x - pos.x;
+            let dy = v.position.y - pos.y;
+            let delta = (dx * dx + dy * dy).sqrt();
+
+            let waiting =
+                hold || v.reservation_hold || sched_yield || v.scheduler_yield;
+
+            if waiting {
+                max_wait_delta = max_wait_delta.max(delta);
+            }
+        }
+
+        if spawn.vehicles().is_empty() {
+            break;
+        }
+    }
+
+    assert!(
+        max_wait_delta < 0.01,
+        "blocked cross-traffic waiter moved {max_wait_delta:.4} px in one frame"
+    );
 }
