@@ -57,7 +57,7 @@ pub const EW_ARM_LENGTH: f32 = INTERSECTION_CENTER_X - INTERSECTION_HALF_SIZE - 
 /// Default cruise speed for newly spawned vehicles (world units per second).
 /// Mid-scale between the original slow tuning (~3.5) and the full world-unit cap (120).
 /// Three spawn levels (B03): Fast ×1.4, Cruise ×1.0, Yield ×0.5 → 84 / 60 / 30 px/s.
-pub const DEFAULT_SPAWN_VELOCITY: f32 = 60.0;
+pub const DEFAULT_SPAWN_VELOCITY: f32 = 160.0;
 
 /// Minimum milliseconds between spawns on the same approach (REQ-18).
 pub const SPAWN_COOLDOWN_MS: u64 = 400;

@@ -146,7 +146,7 @@ impl App {
             FIXED_TIMESTEP_SECS,
         );
         let exited = self.spawn.update(&self.intersection, FIXED_TIMESTEP_SECS);
-        SmartController::enforce_zone_gate(self.spawn.vehicles_mut(), &self.intersection);
+        self.smart.enforce_zone_gate(self.spawn.vehicles_mut(), &self.intersection);
         clamp_velocity_for_proximity(self.spawn.vehicles_mut(), &self.intersection);
         self.stats
             .observe_vehicles(self.spawn.vehicles(), self.session_time);

@@ -23,7 +23,7 @@ fn simulation_tick(
 ) -> Vec<VehicleExit> {
     smart.update(spawn.vehicles_mut(), model, FIXED_TIMESTEP_SECS);
     let exited = spawn.update(model, FIXED_TIMESTEP_SECS);
-    SmartController::enforce_zone_gate(spawn.vehicles_mut(), model);
+    smart.enforce_zone_gate(spawn.vehicles_mut(), model);
     clamp_velocity_for_proximity(spawn.vehicles_mut(), model);
     exited
 }
