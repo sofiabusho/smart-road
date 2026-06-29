@@ -6,7 +6,7 @@ use crate::config::{RESERVATION_TRIGGER_DISTANCE, SAFE_DISTANCE};
 use crate::intersection::{Cardinal, IntersectionModel, LaneId, Vec2};
 use crate::vehicle::{
     apply_reservation_braking, retract_vehicle_outside_zone, sprite_separation_gap, Vehicle,
-    VehicleState, SCHEDULER_CLEAR_GAP, SCHEDULER_SPRITE_GAP_THRESHOLD,
+    VehicleState, SCHEDULER_SPRITE_GAP_THRESHOLD,
 };
 
 /// Coordinates AV passage without traffic lights (C01 detection, C02 scheduling).
@@ -193,29 +193,34 @@ impl SmartController {
     }
 
     /// Command velocities for vehicles inside the managed zone (C02 / REQ-3, REQ-9).
+    ///
+    /// Yield is recomputed every frame from FIFO `entry_sequence` — the earliest entrant
+    /// among nearby conflicts always keeps nominal speed.  This avoids the latched-yield
+    /// deadlock where pairwise yields plus a clear-gap hysteresis loop left every vehicle
+    /// in a cluster at zero speed.
     fn schedule_managed_velocities(&self, vehicles: &mut [Vehicle]) {
+        let len = vehicles.len();
+
         for vehicle in vehicles.iter_mut() {
             if vehicle.state != VehicleState::Managed {
-                if vehicle.scheduler_yield {
-                    vehicle.scheduler_yield = false;
-                }
+                vehicle.scheduler_yield = false;
                 continue;
             }
-            if vehicle.scheduler_yield {
-                vehicle.commanded_velocity = 0.0;
-                vehicle.velocity = 0.0;
-            } else {
-                vehicle.commanded_velocity = vehicle.nominal_velocity;
-            }
+            vehicle.scheduler_yield = false;
+            vehicle.commanded_velocity = vehicle.nominal_velocity;
         }
 
-        let len = vehicles.len();
         for i in 0..len {
             if vehicles[i].state != VehicleState::Managed {
                 continue;
             }
-            for j in (i + 1)..len {
-                if vehicles[j].state != VehicleState::Managed {
+            let seq_i = match self.entry_sequence.get(&vehicles[i].id) {
+                Some(seq) => *seq,
+                None => continue,
+            };
+
+            for j in 0..len {
+                if i == j || vehicles[j].state != VehicleState::Managed {
                     continue;
                 }
 
@@ -225,52 +230,21 @@ impl SmartController {
                     continue;
                 }
 
-                let gap = sprite_separation_gap(&vehicles[i], &vehicles[j]);
-                if gap >= SCHEDULER_SPRITE_GAP_THRESHOLD {
+                if sprite_separation_gap(&vehicles[i], &vehicles[j]) >= SCHEDULER_SPRITE_GAP_THRESHOLD {
                     continue;
                 }
 
-                let seq_i = self.entry_sequence.get(&vehicles[i].id).copied();
-                let seq_j = self.entry_sequence.get(&vehicles[j].id).copied();
-                let yielder = match (seq_i, seq_j) {
-                    (Some(a), Some(b)) if a > b => i,
-                    (Some(a), Some(b)) if a < b => j,
-                    _ => continue,
+                let seq_j = match self.entry_sequence.get(&vehicles[j].id) {
+                    Some(seq) => *seq,
+                    None => continue,
                 };
 
-                vehicles[yielder].scheduler_yield = true;
-                vehicles[yielder].commanded_velocity = 0.0;
-                vehicles[yielder].velocity = 0.0;
-            }
-        }
-
-        for i in 0..len {
-            if !vehicles[i].scheduler_yield || vehicles[i].state != VehicleState::Managed {
-                continue;
-            }
-            let mut clear = true;
-            for j in 0..len {
-                if i == j {
-                    continue;
-                }
-                if vehicles[j].state != VehicleState::Managed
-                    && vehicles[j].state != VehicleState::Exiting
-                {
-                    continue;
-                }
-                let pair = lane_pair_key(vehicles[i].lane_id, vehicles[j].lane_id);
-                let same_lane = vehicles[i].lane_id == vehicles[j].lane_id;
-                if !same_lane && !self.lane_conflicts.contains(&pair) {
-                    continue;
-                }
-                if sprite_separation_gap(&vehicles[i], &vehicles[j]) < SCHEDULER_CLEAR_GAP {
-                    clear = false;
+                if seq_j < seq_i {
+                    vehicles[i].scheduler_yield = true;
+                    vehicles[i].commanded_velocity = 0.0;
+                    vehicles[i].velocity = 0.0;
                     break;
                 }
-            }
-            if clear {
-                vehicles[i].scheduler_yield = false;
-                vehicles[i].commanded_velocity = vehicles[i].nominal_velocity;
             }
         }
     }
@@ -284,6 +258,9 @@ impl SmartController {
 
     fn expand_reservations(&mut self, vehicles: &mut [Vehicle], model: &IntersectionModel) {
         self.revoke_distant_reservations(vehicles, model);
+        self.revoke_non_front_lane_reservations(vehicles, model);
+        self.revoke_stale_grants_from_stopped_holders(vehicles, model);
+        self.revoke_intruder_zone_grants(vehicles, model);
 
         let mut candidates: Vec<(f32, u32, usize)> = vehicles
             .iter()
@@ -292,10 +269,12 @@ impl SmartController {
                 if vehicle.state != VehicleState::Approaching || vehicle.reservation_granted {
                     return None;
                 }
-                let in_zone = point_in_polygon(vehicle.position, &model.zone_polygon);
+                if point_in_polygon(vehicle.position, &model.zone_polygon) {
+                    return None;
+                }
                 let dist = distance_to_zone_entry(model, vehicle).unwrap_or(f32::MAX);
                 let in_trigger = dist > 0.0 && dist <= RESERVATION_TRIGGER_DISTANCE;
-                if in_zone || in_trigger {
+                if in_trigger {
                     let order = self.wait_order.get(&vehicle.id).copied().unwrap_or(u32::MAX);
                     Some((dist, order, idx))
                 } else {
@@ -315,6 +294,75 @@ impl SmartController {
                 continue;
             }
             vehicles[idx].reservation_granted = true;
+        }
+    }
+
+    /// Revoke grants held by approaching vehicles illegally inside the junction zone.
+    fn revoke_intruder_zone_grants(&self, vehicles: &mut [Vehicle], model: &IntersectionModel) {
+        for vehicle in vehicles.iter_mut() {
+            if vehicle.state == VehicleState::Approaching
+                && vehicle.reservation_granted
+                && point_in_polygon(vehicle.position, &model.zone_polygon)
+            {
+                vehicle.reservation_granted = false;
+            }
+        }
+    }
+
+    /// Drop grants held by same-lane followers so only the queue front blocks cross-traffic.
+    fn revoke_non_front_lane_reservations(&self, vehicles: &mut [Vehicle], model: &IntersectionModel) {
+        let len = vehicles.len();
+        for idx in 0..len {
+            if vehicles[idx].state != VehicleState::Approaching || !vehicles[idx].reservation_granted {
+                continue;
+            }
+            let holder_dist = distance_to_zone_entry(model, &vehicles[idx]).unwrap_or(f32::MAX);
+            for other_idx in 0..len {
+                if idx == other_idx || vehicles[other_idx].state != VehicleState::Approaching {
+                    continue;
+                }
+                if vehicles[other_idx].lane_id != vehicles[idx].lane_id {
+                    continue;
+                }
+                let other_dist =
+                    distance_to_zone_entry(model, &vehicles[other_idx]).unwrap_or(f32::MAX);
+                if other_dist + 0.5 < holder_dist {
+                    vehicles[idx].reservation_granted = false;
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Drop grants from stopped holders when a closer conflicting waiter is queued.
+    fn revoke_stale_grants_from_stopped_holders(
+        &self,
+        vehicles: &mut [Vehicle],
+        model: &IntersectionModel,
+    ) {
+        let len = vehicles.len();
+        for idx in 0..len {
+            if vehicles[idx].state != VehicleState::Approaching
+                || !vehicles[idx].reservation_granted
+                || vehicles[idx].velocity > 0.5
+            {
+                continue;
+            }
+            let holder_dist = distance_to_zone_entry(model, &vehicles[idx]).unwrap_or(f32::MAX);
+            for other_idx in 0..len {
+                if idx == other_idx || vehicles[other_idx].state != VehicleState::Approaching {
+                    continue;
+                }
+                if !self.cross_paths_conflict(vehicles[idx].lane_id, vehicles[other_idx].lane_id) {
+                    continue;
+                }
+                let other_dist =
+                    distance_to_zone_entry(model, &vehicles[other_idx]).unwrap_or(f32::MAX);
+                if other_dist + 1.0 < holder_dist {
+                    vehicles[idx].reservation_granted = false;
+                    break;
+                }
+            }
         }
     }
 
@@ -359,9 +407,17 @@ impl SmartController {
                 continue;
             }
             if point_in_polygon(other.position, &model.zone_polygon) {
+                // Unreserved approaching vehicles are retracted each frame by enforce_zone_gate;
+                // they must not permanently block cross-traffic reservations.
+                if other.state == VehicleState::Approaching && !other.reservation_granted {
+                    continue;
+                }
                 return true;
             }
             if other.state == VehicleState::Approaching && other.reservation_granted {
+                if point_in_polygon(other.position, &model.zone_polygon) {
+                    continue;
+                }
                 let other_dist = distance_to_zone_entry(model, other).unwrap_or(0.0);
                 // Only block when the reserved vehicle is at least as close to the zone.
                 if other_dist <= candidate_dist {
@@ -751,6 +807,48 @@ mod tests {
         assert_eq!(
             vehicles[1].commanded_velocity, nominal,
             "same-lane follower keeps speed; follow-distance handles spacing"
+        );
+    }
+
+    #[test]
+    fn unreserved_approaching_in_zone_does_not_block_cross_traffic() {
+        let model = IntersectionModel::new();
+        let mut smart = SmartController::new();
+        let center = Vec2::new(
+            crate::config::INTERSECTION_CENTER_X,
+            crate::config::INTERSECTION_CENTER_Y,
+        );
+        let south_lane = lane_id(Cardinal::South, Route::Straight);
+        let east_lane = lane_id(Cardinal::East, Route::Straight);
+        let (_, max_x, _, _) = zone_bounds(&model.zone_polygon);
+
+        let mut intruder = test_vehicle_at(center, VehicleState::Approaching);
+        intruder.id = VehicleId(1);
+        intruder.lane_id = south_lane;
+        intruder.approach = Cardinal::South;
+        intruder.reservation_granted = false;
+
+        let mut waiter = test_vehicle_at(
+            Vec2::new(max_x + crate::config::VEHICLE_LENGTH, center.y),
+            VehicleState::Approaching,
+        );
+        waiter.id = VehicleId(2);
+        waiter.lane_id = east_lane;
+        waiter.approach = Cardinal::East;
+        waiter.nominal_velocity = 120.0;
+        waiter.velocity = 120.0;
+        waiter.commanded_velocity = 120.0;
+
+        let mut vehicles = vec![intruder, waiter];
+        smart.update(&mut vehicles, &model, 0.0);
+
+        assert!(
+            vehicles[1].reservation_granted,
+            "cross-traffic must not be blocked by an unreserved vehicle retracted from the zone"
+        );
+        assert!(
+            !vehicles[1].reservation_hold,
+            "waiter should not be held when the only zone occupant is an unreserved intruder"
         );
     }
 
