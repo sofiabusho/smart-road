@@ -8,7 +8,7 @@ use crate::vehicle::VehicleId;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stats {
     pub vehicles_passed: u32,
-    /// Cumulative vehicles that completed a crossing (equals `vehicles_passed` until concurrent-peak tracking is added in C06).
+    /// REQ-20 / AUD-20: total vehicles that completed a crossing (synced with `vehicles_passed` on finalize).
     pub max_vehicles_passed: u32,
     pub max_velocity: f32,
     pub min_velocity: f32,
@@ -53,11 +53,15 @@ impl Stats {
     /// Finalize derived bonus metrics before display (C08).
     pub fn finalize_session(&mut self, session_duration_secs: f32) {
         self.session_duration_secs = session_duration_secs;
+        self.max_vehicles_passed = self.vehicles_passed;
         if self.vehicles_passed > 0 {
             self.avg_crossing_time_secs = self.sum_crossing_time_secs / self.vehicles_passed as f32;
         }
     }
 }
+
+/// Ignore full stops when tracking REQ-22 min velocity (queue/yield zeros are not a speed tier).
+const MIN_MOVING_VELOCITY: f32 = 1.0;
 
 /// Events fed into the stats collector from the simulation loop.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -112,7 +116,9 @@ fn update_velocity_bounds(stats: &mut Stats, velocity: f32) {
         return;
     }
     stats.max_velocity = stats.max_velocity.max(velocity);
-    stats.min_velocity = stats.min_velocity.min(velocity);
+    if velocity >= MIN_MOVING_VELOCITY {
+        stats.min_velocity = stats.min_velocity.min(velocity);
+    }
 }
 
 fn update_crossing_time_bounds(stats: &mut Stats, crossing_time: f32) {
@@ -251,6 +257,38 @@ mod tests {
 
         assert_eq!(stats.max_velocity, 120.0);
         assert_eq!(stats.min_velocity, 60.0);
+    }
+
+    #[test]
+    fn stopped_samples_do_not_skew_min_velocity() {
+        let mut stats = Stats::new();
+        for v in [0.0, 0.0, 80.0, 0.0] {
+            apply_event(
+                &mut stats,
+                StatsEvent::VelocitySample {
+                    id: VehicleId(1),
+                    v,
+                },
+            );
+        }
+
+        assert_eq!(stats.min_velocity, 80.0);
+    }
+
+    #[test]
+    fn finalize_session_syncs_max_vehicles_passed() {
+        let mut stats = Stats::new();
+        apply_event(
+            &mut stats,
+            StatsEvent::VehicleExited {
+                id: VehicleId(1),
+                crossing_time: 2.0,
+                peak_velocity: 100.0,
+            },
+        );
+        stats.max_vehicles_passed = 0;
+        stats.finalize_session(5.0);
+        assert_eq!(stats.max_vehicles_passed, 1);
     }
 
     #[test]

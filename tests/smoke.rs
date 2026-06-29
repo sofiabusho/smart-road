@@ -782,27 +782,33 @@ fn assert_stats_window_fields(stats: &smart_road::stats::Stats, session_time: f3
     let joined = lines.join("\n");
 
     assert!(
-        joined.contains("Max vehicles passed:"),
+        joined.contains("Max number of vehicles that passed the intersection:"),
         "AUD-20 label missing"
     );
-    assert!(joined.contains("Max velocity:"), "AUD-21 max label missing");
-    assert!(joined.contains("Min velocity:"), "AUD-21 min label missing");
     assert!(
-        joined.contains("Max time to pass intersection (s):"),
+        joined.contains("Max velocity of all vehicles:"),
+        "AUD-21 max label missing"
+    );
+    assert!(
+        joined.contains("Min velocity of all vehicles:"),
+        "AUD-21 min label missing"
+    );
+    assert!(
+        joined.contains("Max time that took the vehicle to pass the intersection (s):"),
         "AUD-22 label missing"
     );
     assert!(
-        joined.contains("Min time to pass intersection (s):"),
+        joined.contains("Min time that took the vehicle to pass the intersection (s):"),
         "AUD-23 label missing"
     );
     assert!(joined.contains("Close calls:"), "AUD-24 label missing");
 
     assert!(
-        !joined.contains("Min velocity: N/A") || stats.min_velocity == f32::MAX,
+        !joined.contains("Min velocity of all vehicles: N/A") || stats.min_velocity == f32::MAX,
         "min velocity should be numeric after vehicles moved"
     );
     assert!(
-        !joined.contains("Max velocity: 0"),
+        !joined.contains("Max velocity of all vehicles: 0"),
         "max velocity should be positive after vehicles moved"
     );
     assert!(
@@ -877,7 +883,9 @@ fn crate_smoke_audit18_four_vehicle_session_no_collision() {
     let mut display_stats = stats.stats.clone();
     display_stats.finalize_session(session_time);
     let lines = format_stats_lines(&display_stats);
-    assert!(lines.iter().any(|l| l.contains("Max vehicles passed: 4")));
+    assert!(lines.iter().any(|l| {
+        l.contains("Max number of vehicles that passed the intersection: 4")
+    }));
     assert!(lines.iter().any(|l| l.contains("Close calls: 0")));
 }
 
@@ -916,11 +924,11 @@ fn crate_smoke_audit25_single_vehicle_equal_crossing_times() {
     let lines = format_stats_lines(&display_stats);
     let max_line = lines
         .iter()
-        .find(|l| l.starts_with("Max time"))
+        .find(|l| l.starts_with("Max time that took"))
         .expect("max line");
     let min_line = lines
         .iter()
-        .find(|l| l.starts_with("Min time"))
+        .find(|l| l.starts_with("Min time that took"))
         .expect("min line");
     assert_eq!(
         max_line.split(": ").nth(1),

@@ -28,21 +28,24 @@ pub fn format_stats_lines(stats: &Stats) -> Vec<String> {
     vec![
         "Session statistics".to_string(),
         String::new(),
-        format!("Max vehicles passed: {}", stats.max_vehicles_passed),
         format!(
-            "Max velocity: {}",
+            "Max number of vehicles that passed the intersection: {}",
+            stats.vehicles_passed
+        ),
+        format!(
+            "Max velocity of all vehicles: {}",
             format_velocity(stats.max_velocity, true)
         ),
         format!(
-            "Min velocity: {}",
+            "Min velocity of all vehicles: {}",
             format_velocity(stats.min_velocity, false)
         ),
         format!(
-            "Max time to pass intersection (s): {}",
+            "Max time that took the vehicle to pass the intersection (s): {}",
             format_crossing_time(stats.max_crossing_time, true)
         ),
         format!(
-            "Min time to pass intersection (s): {}",
+            "Min time that took the vehicle to pass the intersection (s): {}",
             format_crossing_time(stats.min_crossing_time, false)
         ),
         format!("Close calls: {}", stats.close_calls),
@@ -428,20 +431,20 @@ mod tests {
     fn format_includes_all_audit_labels() {
         let lines = format_stats_lines(&sample_stats());
         let joined = lines.join("\n");
-        assert!(joined.contains("Max vehicles passed"));
-        assert!(joined.contains("Max velocity"));
-        assert!(joined.contains("Min velocity"));
-        assert!(joined.contains("Max time to pass intersection"));
-        assert!(joined.contains("Min time to pass intersection"));
+        assert!(joined.contains("Max number of vehicles that passed the intersection"));
+        assert!(joined.contains("Max velocity of all vehicles"));
+        assert!(joined.contains("Min velocity of all vehicles"));
+        assert!(joined.contains("Max time that took the vehicle to pass the intersection"));
+        assert!(joined.contains("Min time that took the vehicle to pass the intersection"));
         assert!(joined.contains("Close calls"));
     }
 
     #[test]
     fn audit20_shows_four_vehicles_passed() {
         let lines = format_stats_lines(&sample_stats());
-        assert!(lines
-            .iter()
-            .any(|line| line.contains("Max vehicles passed: 4")));
+        assert!(lines.iter().any(|line| {
+            line.contains("Max number of vehicles that passed the intersection: 4")
+        }));
     }
 
     #[test]
@@ -458,11 +461,11 @@ mod tests {
         let lines = format_stats_lines(&stats);
         let max_line = lines
             .iter()
-            .find(|line| line.starts_with("Max time"))
+            .find(|line| line.starts_with("Max time that took"))
             .expect("max crossing line");
         let min_line = lines
             .iter()
-            .find(|line| line.starts_with("Min time"))
+            .find(|line| line.starts_with("Min time that took"))
             .expect("min crossing line");
         assert_eq!(
             max_line.split(": ").nth(1),
@@ -474,9 +477,9 @@ mod tests {
     #[test]
     fn empty_session_uses_na_for_unset_mins() {
         let lines = format_stats_lines(&Stats::new());
-        assert!(lines.iter().any(|line| line.contains("Min velocity: N/A")));
+        assert!(lines.iter().any(|line| line.contains("Min velocity of all vehicles: N/A")));
         assert!(lines
             .iter()
-            .any(|line| line.contains("Min time to pass intersection (s): N/A")));
+            .any(|line| line.contains("Min time that took the vehicle to pass the intersection (s): N/A")));
     }
 }
