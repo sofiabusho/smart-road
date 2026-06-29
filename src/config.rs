@@ -67,9 +67,12 @@ pub const VEHICLE_WIDTH: f32 = 22.0;
 /// Vehicle sprite length in world units (pixels at 1:1 scale).
 pub const VEHICLE_LENGTH: f32 = 36.0;
 
+/// Visible buffer beyond sprite length for same-lane following (audit LIM-2).
+pub const FOLLOW_MARGIN: f32 = 16.0;
+
 /// Minimum center-to-center gap between vehicles on the same lane (REQ-8 / AUD-29).
 /// PRD OQ-2: strictly positive and at least one vehicle length.
-pub const SAFE_DISTANCE: f32 = 40.0;
+pub const SAFE_DISTANCE: f32 = VEHICLE_LENGTH + FOLLOW_MARGIN;
 
 /// Maximum acceleration toward commanded speed (world units/s²). B05 scales per vehicle.
 pub const BASE_ACCELERATION: f32 = 90.0;
