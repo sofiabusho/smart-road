@@ -13,9 +13,9 @@ use smart_road::smart::SmartController;
 use smart_road::spawn::{SpawnRequest, SpawnSystem, VehicleExit};
 use smart_road::stats::StatsSession;
 use smart_road::stats_window::format_stats_lines;
-use smart_road::vehicle::{clamp_velocity_for_proximity, sprite_separation_gap, VehicleState};
+use smart_road::vehicle::{resolve_proximity_overlaps, sprite_separation_gap, VehicleState};
 
-/// One simulation tick: smart (schedule) → physics → zone gate → proximity clamp.
+/// One simulation tick: smart → pre-move safety → physics → zone gate → overlap resolve.
 fn simulation_tick(
     spawn: &mut SpawnSystem,
     smart: &mut SmartController,
@@ -24,7 +24,7 @@ fn simulation_tick(
     smart.update(spawn.vehicles_mut(), model, FIXED_TIMESTEP_SECS);
     let exited = spawn.update(model, FIXED_TIMESTEP_SECS);
     smart.enforce_zone_gate(spawn.vehicles_mut(), model);
-    clamp_velocity_for_proximity(spawn.vehicles_mut(), model);
+    resolve_proximity_overlaps(spawn.vehicles_mut());
     exited
 }
 #[test]

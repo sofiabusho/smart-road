@@ -1,7 +1,7 @@
 //! Autonomous vehicle state and physics (B01+).
 
 use crate::intersection::{
-    IntersectionModel, LaneId, LaneInfo, Route, Vec2, VehicleRenderSnapshot,
+    Cardinal, IntersectionModel, LaneId, LaneInfo, Route, Vec2, VehicleRenderSnapshot,
 };
 
 /// Unique vehicle identifier.
@@ -64,6 +64,118 @@ pub struct Vehicle {
 /// True when an external controller owns this vehicle's speed (scheduler or reservation gate).
 pub fn is_motion_frozen(vehicle: &Vehicle) -> bool {
     vehicle.scheduler_yield || vehicle.reservation_hold
+}
+
+/// True when a stationary vehicle may begin rolling — avoids move-then-brake creep.
+///
+/// Vehicles already in motion keep normal follow/proximity braking; this gate only
+/// blocks the first acceleration from rest until the path ahead is clear.
+pub fn coast_clear_for_departure(
+    vehicle: &Vehicle,
+    vehicles: &[Vehicle],
+    model: &IntersectionModel,
+    safe_distance: f32,
+) -> bool {
+    if is_motion_frozen(vehicle) || vehicle.commanded_velocity < 0.01 {
+        return false;
+    }
+    if vehicle.velocity >= 0.01 {
+        return true;
+    }
+
+    if vehicle.state == VehicleState::Approaching && !vehicle.reservation_granted {
+        if let Some(dist) = distance_to_zone_entry(model, vehicle) {
+            if dist > 0.0 && dist <= crate::config::RESERVATION_TRIGGER_DISTANCE {
+                return false;
+            }
+        }
+    }
+
+    let mut gap_ahead = f32::INFINITY;
+    let mut leader_velocity = 0.0_f32;
+    for other in vehicles {
+        if other.id == vehicle.id || other.state == VehicleState::Done {
+            continue;
+        }
+        if other.lane_id != vehicle.lane_id {
+            continue;
+        }
+        if let Some(gap) = longitudinal_gap(vehicle, other) {
+            if gap < gap_ahead {
+                gap_ahead = gap;
+                leader_velocity = other.velocity;
+            }
+        }
+    }
+
+    if leader_velocity < 0.01 && gap_ahead < f32::INFINITY {
+        let start_buffer = vehicle.nominal_velocity * crate::config::FIXED_TIMESTEP_SECS * 2.0;
+        if gap_ahead <= safe_distance + start_buffer {
+            return false;
+        }
+    }
+
+    for other in vehicles {
+        if other.id == vehicle.id || other.state == VehicleState::Done {
+            continue;
+        }
+        if sprite_separation_gap(vehicle, other) >= PROXIMITY_BOX_CLEARANCE {
+            continue;
+        }
+        if proximity_yielder_is_a(vehicle, other) {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn distance_to_zone_entry(model: &IntersectionModel, vehicle: &Vehicle) -> Option<f32> {
+    let zone = &model.zone_polygon;
+    if zone.len() < 4 {
+        return None;
+    }
+    let mut min_x = f32::MAX;
+    let mut max_x = f32::MIN;
+    let mut min_y = f32::MAX;
+    let mut max_y = f32::MIN;
+    for point in zone {
+        min_x = min_x.min(point.x);
+        max_x = max_x.max(point.x);
+        min_y = min_y.min(point.y);
+        max_y = max_y.max(point.y);
+    }
+    let pos = vehicle.position;
+    match vehicle.approach {
+        Cardinal::South => {
+            if pos.y <= max_y {
+                Some(0.0)
+            } else {
+                Some(pos.y - max_y)
+            }
+        }
+        Cardinal::North => {
+            if pos.y >= min_y {
+                Some(0.0)
+            } else {
+                Some(min_y - pos.y)
+            }
+        }
+        Cardinal::East => {
+            if pos.x <= max_x {
+                Some(0.0)
+            } else {
+                Some(pos.x - max_x)
+            }
+        }
+        Cardinal::West => {
+            if pos.x >= min_x {
+                Some(0.0)
+            } else {
+                Some(min_x - pos.x)
+            }
+        }
+    }
 }
 
 /// Maximum speed that still allows a full stop within `distance` at deceleration `decel`.
@@ -209,8 +321,11 @@ fn uses_follow_distance(vehicle: &Vehicle) -> bool {
 /// Cap speeds so same-lane followers keep separation (REQ-8 / REQ-9 / AUD-30).
 ///
 /// Skips vehicles in `Managed` state — the smart controller owns the junction zone (C02+).
+/// Uses both center-to-center longitudinal gap and oriented sprite box gap on the same lane.
 pub fn enforce_follow_distance(vehicles: &mut [Vehicle], safe_distance: f32) {
     let len = vehicles.len();
+    let min_box_gap = safe_distance - crate::config::VEHICLE_LENGTH;
+    let dt = crate::config::FIXED_TIMESTEP_SECS;
 
     for i in 0..len {
         if !uses_follow_distance(&vehicles[i]) || is_motion_frozen(&vehicles[i]) {
@@ -220,6 +335,7 @@ pub fn enforce_follow_distance(vehicles: &mut [Vehicle], safe_distance: f32) {
         let nominal = vehicles[i].nominal_velocity;
         let mut gap_ahead = f32::INFINITY;
         let mut leader_velocity = 0.0_f32;
+        let mut leader_idx: Option<usize> = None;
 
         for j in 0..len {
             if i == j || vehicles[j].state == VehicleState::Done {
@@ -233,6 +349,7 @@ pub fn enforce_follow_distance(vehicles: &mut [Vehicle], safe_distance: f32) {
                 if gap < gap_ahead {
                     gap_ahead = gap;
                     leader_velocity = vehicles[j].velocity;
+                    leader_idx = Some(j);
                 }
             }
         }
@@ -242,25 +359,116 @@ pub fn enforce_follow_distance(vehicles: &mut [Vehicle], safe_distance: f32) {
             continue;
         }
 
-        let scale = (gap_ahead / safe_distance).clamp(0.0, 1.0);
+        let mut box_gap = f32::INFINITY;
+        if let Some(j) = leader_idx {
+            box_gap = sprite_separation_gap(&vehicles[i], &vehicles[j]);
+        }
+
+        let center_scale = (gap_ahead / safe_distance).clamp(0.0, 1.0);
+        let box_scale = if box_gap.is_finite() && box_gap >= 0.0 {
+            (box_gap / min_box_gap).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let scale = if box_gap < 0.0 {
+            center_scale
+        } else {
+            center_scale.min(box_scale)
+        };
+
         let target = if gap_ahead <= safe_distance * 0.1 {
+            0.0
+        } else if box_gap >= 0.0 && box_gap <= min_box_gap * 0.1 {
             0.0
         } else {
             leader_velocity.min(nominal * scale)
         };
 
-        let dt = crate::config::FIXED_TIMESTEP_SECS;
         let capped = if leader_velocity < 0.01 {
-            // Stopped leader: B05 ramp cannot overshoot spacing while decelerating.
-            let max_speed_for_gap = ((gap_ahead - safe_distance).max(0.0)) / dt;
+            let usable_center = (gap_ahead - safe_distance).max(0.0);
+            let usable_box = if box_gap >= 0.0 {
+                (box_gap - min_box_gap).max(0.0)
+            } else {
+                f32::INFINITY
+            };
+            let max_speed_for_gap = usable_center.min(usable_box) / dt;
             target.min(max_speed_for_gap)
         } else {
-            // Moving leader: match pace, never close faster than the vehicle ahead.
             target.min(leader_velocity)
         };
 
-        vehicles[i].commanded_velocity = capped;
+        vehicles[i].commanded_velocity = vehicles[i].commanded_velocity.min(capped);
         vehicles[i].velocity = vehicles[i].velocity.min(capped);
+    }
+}
+
+/// Apply proximity speed limits before movement (yielder held at zero when too close).
+pub fn apply_proximity_speed_limits(vehicles: &mut [Vehicle]) {
+    let min_gap = PROXIMITY_BOX_CLEARANCE;
+    let len = vehicles.len();
+
+    for i in 0..len {
+        if vehicles[i].state == VehicleState::Done {
+            continue;
+        }
+        for j in (i + 1)..len {
+            if vehicles[j].state == VehicleState::Done {
+                continue;
+            }
+
+            let sep = sprite_separation_gap(&vehicles[i], &vehicles[j]);
+            if sep >= min_gap {
+                continue;
+            }
+
+            let a_yields = proximity_yielder_is_a(&vehicles[i], &vehicles[j]);
+            let yielder = if a_yields { i } else { j };
+            let leader = if a_yields { j } else { i };
+
+            if is_motion_frozen(&vehicles[yielder]) {
+                continue;
+            }
+
+            vehicles[yielder].commanded_velocity = 0.0;
+            vehicles[yielder].velocity = 0.0;
+
+            if sep < 0.0 && vehicles[leader].state == VehicleState::Managed {
+                let cap = VelocityLevel::Yield.speed();
+                vehicles[leader].commanded_velocity =
+                    vehicles[leader].commanded_velocity.min(cap);
+                vehicles[leader].velocity = vehicles[leader].velocity.min(cap);
+            }
+        }
+    }
+}
+
+/// Single pre-move pass: follow distance, proximity limits, and departure gate.
+pub fn apply_pre_move_safety(
+    vehicles: &mut [Vehicle],
+    model: &IntersectionModel,
+    safe_distance: f32,
+) {
+    enforce_follow_distance(vehicles, safe_distance);
+    apply_proximity_speed_limits(vehicles);
+
+    let len = vehicles.len();
+    for i in 0..len {
+        if vehicles[i].state == VehicleState::Done {
+            continue;
+        }
+        if is_motion_frozen(&vehicles[i]) {
+            vehicles[i].velocity = 0.0;
+            vehicles[i].commanded_velocity = 0.0;
+            continue;
+        }
+        if vehicles[i].velocity < 0.01 && vehicles[i].commanded_velocity > 0.01
+            && !coast_clear_for_departure(&vehicles[i], vehicles, model, safe_distance)
+        {
+            vehicles[i].velocity = 0.0;
+            vehicles[i].commanded_velocity = 0.0;
+            continue;
+        }
+        vehicles[i].velocity = vehicles[i].velocity.min(vehicles[i].commanded_velocity);
     }
 }
 
@@ -537,47 +745,10 @@ fn proximity_yielder_is_a(a: &Vehicle, b: &Vehicle) -> bool {
     a.id.0 > b.id.0
 }
 
-/// Slow the yielder and separate sprites when oriented boxes overlap.
-///
-/// The yielder is held at zero speed while too close; position nudges happen only
-/// during actual sprite overlap (`sep < 0`) so waiting vehicles stay visually still.
-pub fn clamp_velocity_for_proximity(vehicles: &mut [Vehicle], _model: &IntersectionModel) {
+/// Emergency separation when oriented boxes overlap after movement.
+pub fn resolve_proximity_overlaps(vehicles: &mut [Vehicle]) {
     let min_gap = PROXIMITY_BOX_CLEARANCE;
     let len = vehicles.len();
-
-    for i in 0..len {
-        if vehicles[i].state == VehicleState::Done {
-            continue;
-        }
-        for j in (i + 1)..len {
-            if vehicles[j].state == VehicleState::Done {
-                continue;
-            }
-
-            let sep = sprite_separation_gap(&vehicles[i], &vehicles[j]);
-            if sep >= min_gap {
-                continue;
-            }
-
-            let a_yields = proximity_yielder_is_a(&vehicles[i], &vehicles[j]);
-            let yielder = if a_yields { i } else { j };
-            let leader = if a_yields { j } else { i };
-
-            if is_motion_frozen(&vehicles[yielder]) {
-                continue;
-            }
-
-            vehicles[yielder].commanded_velocity = 0.0;
-            vehicles[yielder].velocity = 0.0;
-
-            if sep < 0.0 && vehicles[leader].state == VehicleState::Managed {
-                let cap = VelocityLevel::Yield.speed();
-                vehicles[leader].commanded_velocity =
-                    vehicles[leader].commanded_velocity.min(cap);
-                vehicles[leader].velocity = vehicles[leader].velocity.min(cap);
-            }
-        }
-    }
 
     loop {
         let mut any_pushed = false;
@@ -627,6 +798,15 @@ pub fn clamp_velocity_for_proximity(vehicles: &mut [Vehicle], _model: &Intersect
             break;
         }
     }
+}
+
+/// Slow the yielder and separate sprites when oriented boxes overlap.
+///
+/// Prefer [`apply_pre_move_safety`] before movement and [`resolve_proximity_overlaps`]
+/// after; this runs both for integration tests that invoke it directly.
+pub fn clamp_velocity_for_proximity(vehicles: &mut [Vehicle], _model: &IntersectionModel) {
+    apply_proximity_speed_limits(vehicles);
+    resolve_proximity_overlaps(vehicles);
 }
 
 /// Move vehicle along its lane path polyline for this frame.
@@ -1038,6 +1218,47 @@ mod tests {
     }
 
     #[test]
+    fn coast_clear_blocks_departure_behind_stopped_leader_until_gap_opens() {
+        let model = IntersectionModel::new();
+        let lid = lane_id(Cardinal::South, Route::Straight);
+        let lane = model.lane(lid).unwrap();
+        let safe = crate::config::SAFE_DISTANCE;
+        let fast = VelocityLevel::Fast.speed();
+
+        let mut leader = spawn_vehicle(VehicleId(1), lane, fast);
+        leader.position = Vec2::new(lane.spawn_point.x, 700.0);
+        leader.velocity = 0.0;
+        leader.commanded_velocity = 0.0;
+
+        let mut follower = spawn_vehicle(VehicleId(2), lane, fast);
+        follower.velocity = 0.0;
+        follower.commanded_velocity = fast;
+        follower.position = Vec2::new(lane.spawn_point.x, leader.position.y + safe + 1.0);
+
+        let vehicles = vec![leader, follower];
+        assert!(
+            !coast_clear_for_departure(&vehicles[1], &vehicles, &model, safe),
+            "must not roll when only barely past safe distance behind a stopped leader"
+        );
+
+        let mut follower_clear = spawn_vehicle(VehicleId(3), lane, fast);
+        follower_clear.velocity = 0.0;
+        follower_clear.commanded_velocity = fast;
+        let start_buffer = fast * crate::config::FIXED_TIMESTEP_SECS * 2.0;
+        let mut leader2 = spawn_vehicle(VehicleId(4), lane, fast);
+        leader2.position = Vec2::new(lane.spawn_point.x, 700.0);
+        leader2.velocity = 0.0;
+        leader2.commanded_velocity = 0.0;
+        follower_clear.position =
+            Vec2::new(lane.spawn_point.x, leader2.position.y + safe + start_buffer + 4.0);
+        let vehicles_clear = vec![leader2, follower_clear];
+        assert!(
+            coast_clear_for_departure(&vehicles_clear[1], &vehicles_clear, &model, safe),
+            "may roll once a comfortable gap opens"
+        );
+    }
+
+    #[test]
     fn enforce_follow_distance_slows_follower_behind_stopped_leader() {
         let model = IntersectionModel::new();
         let lid = lane_id(Cardinal::South, Route::Straight);
@@ -1176,7 +1397,7 @@ mod tests {
             "follower should restore nominal speed when gap is safe"
         );
         let before = vehicles[1].velocity;
-        for _ in 0..120 {
+        for _ in 0..250 {
             step_velocity_toward_command(&mut vehicles[1], crate::config::FIXED_TIMESTEP_SECS);
         }
         assert!(

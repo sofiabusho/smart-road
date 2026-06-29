@@ -18,7 +18,7 @@ use crate::spawn::SpawnSystem;
 use crate::stats::StatsSession;
 use crate::stats_window::{session_summary_from, show_stats_window, SessionSummary};
 use crate::vehicle::snapshot_for_render;
-use crate::vehicle::{detect_close_call, clamp_velocity_for_proximity, VehicleState};
+use crate::vehicle::{detect_close_call, resolve_proximity_overlaps, VehicleState};
 
 type WindowCanvas = Canvas<Window>;
 
@@ -147,7 +147,7 @@ impl App {
         );
         let exited = self.spawn.update(&self.intersection, FIXED_TIMESTEP_SECS);
         self.smart.enforce_zone_gate(self.spawn.vehicles_mut(), &self.intersection);
-        clamp_velocity_for_proximity(self.spawn.vehicles_mut(), &self.intersection);
+        resolve_proximity_overlaps(self.spawn.vehicles_mut());
         self.stats
             .observe_vehicles(self.spawn.vehicles(), self.session_time);
         self.record_close_calls();

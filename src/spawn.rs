@@ -195,22 +195,23 @@ impl SpawnSystem {
 
     /// Advance movement along lane paths and remove vehicles that left the canvas.
     pub fn update(&mut self, model: &IntersectionModel, dt: f32) -> Vec<VehicleExit> {
-        crate::vehicle::enforce_follow_distance(&mut self.vehicles, crate::config::SAFE_DISTANCE);
+        crate::vehicle::apply_pre_move_safety(&mut self.vehicles, model, crate::config::SAFE_DISTANCE);
         let mut exited = Vec::new();
+        let len = self.vehicles.len();
 
-        for vehicle in &mut self.vehicles {
-            if vehicle.state == VehicleState::Done {
+        for i in 0..len {
+            if self.vehicles[i].state == VehicleState::Done {
                 continue;
             }
-            crate::vehicle::advance_along_path(vehicle, model, dt);
-            if is_off_screen(vehicle.position) {
-                if vehicle.state != VehicleState::Approaching {
+            crate::vehicle::advance_along_path(&mut self.vehicles[i], model, dt);
+            if is_off_screen(self.vehicles[i].position) {
+                if self.vehicles[i].state != VehicleState::Approaching {
                     exited.push(VehicleExit {
-                        id: vehicle.id,
-                        time_in_crossing: vehicle.time_in_crossing,
+                        id: self.vehicles[i].id,
+                        time_in_crossing: self.vehicles[i].time_in_crossing,
                     });
                 }
-                vehicle.state = VehicleState::Done;
+                self.vehicles[i].state = VehicleState::Done;
             }
         }
         self.vehicles.retain(|v| v.state != VehicleState::Done);
