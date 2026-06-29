@@ -7,7 +7,7 @@ use crate::intersection::{Cardinal, IntersectionModel, LaneId, Route, Vec2};
 use crate::vehicle::{spawn_vehicle, Vehicle, VehicleId, VehicleState};
 
 /// Maximum vehicles allowed on a single lane before new spawns are blocked (AUD-17).
-pub const LANE_CAPACITY: usize = 8;
+pub const LANE_CAPACITY: usize = 7;
 
 /// Lightweight PRNG for spawn randomization (no extra crate dependency).
 #[derive(Debug, Clone)]

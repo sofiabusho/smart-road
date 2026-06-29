@@ -682,9 +682,9 @@ fn crate_smoke_aud16_aud17_sustained_no_overlap_no_lane_overflow() {
     );
 }
 
-/// AUD-17 unit: the `LANE_CAPACITY` guard blocks exactly the ninth spawn on a full lane.
+/// AUD-17 unit: the `LANE_CAPACITY` guard blocks spawn once a lane is full.
 #[test]
-fn crate_unit_lane_cap_blocks_ninth_spawn() {
+fn crate_unit_lane_cap_blocks_spawn_when_full() {
     use smart_road::spawn::LANE_CAPACITY;
 
     let model = IntersectionModel::new();
@@ -710,7 +710,7 @@ fn crate_unit_lane_cap_blocks_ninth_spawn() {
         "lane must hold exactly LANE_CAPACITY vehicles after filling"
     );
 
-    // The ninth attempt must be rejected by the cap, not the cooldown.
+    // The next attempt must be rejected by the cap, not the cooldown.
     spawn.force_cooldowns_expired();
     assert!(
         spawn.try_spawn(req, &model).is_none(),
